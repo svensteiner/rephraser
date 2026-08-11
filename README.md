@@ -8,7 +8,15 @@ Python-Installation:
 1. [`TextVerbessern-Windows.zip`](https://github.com/svensteiner/rephraser/releases/download/portable-latest/TextVerbessern-Windows.zip) herunterladen.
 2. ZIP-Datei entpacken.
 3. `TextVerbessern.exe` doppelklicken.
-4. Text einfügen, **Text überarbeiten** und **Ergebnis kopieren**.
+4. Text einfügen, **Text verbessern** und **Ergebnis kopieren**.
+
+Für den direkten Kopierablauf gibt es in der Windows-App die Schaltfläche
+**Aus Zwischenablage einfügen**. Die App zeigt nur Funktionen an, die auf dem jeweiligen
+PC wirklich verfügbar sind. **Schnell verbessern** arbeitet regelbasiert, vollständig
+lokal und typischerweise in deutlich unter einer Sekunde. Wirkungslose Optionen werden
+nicht angeboten.
+Die lokale Modellbearbeitung ist auf 45 Sekunden begrenzt. Antwortet Mistral nicht
+rechtzeitig, zeigt die App automatisch die sofort verfügbare sichere Bereinigung an.
 
 Die sichere Grundbereinigung funktioniert direkt. Die sprachliche Überarbeitung steht
 zusätzlich zur Verfügung, wenn auf dem jeweiligen PC Ollama mit `mistral` lokal läuft.
@@ -19,7 +27,7 @@ kann Windows beim ersten Start eine Sicherheitsabfrage anzeigen.
 
 1. Doppelklicke im Projektordner auf **`TEXT VERBESSERN.cmd`**.
 2. Füge einen Text aus Claude oder einer anderen Quelle ein.
-3. Klicke auf **Text überarbeiten**.
+3. Klicke auf **Text verbessern**.
 4. Klicke auf **Ergebnis kopieren**.
 
 Beim ersten Start richtet das Startprogramm eine private Laufzeitumgebung unter
@@ -38,18 +46,20 @@ or statistical watermarking systems.
 
 ## Privacy and provider model
 
-The default rule stage is deterministic and offline. It sends neither text nor derived
-features anywhere. The normal UI then uses `mistral-local` for substantive editing when
-the local model is available. It talks to an Ollama-compatible Mistral endpoint
+The default `fast-editor` stage is deterministic, offline, and immediate. It applies a
+small set of tested business-language improvements while protecting quotations and code.
+It sends neither text nor derived features anywhere. The optional thorough mode uses
+`mistral-local` when the local model is available. It talks to an Ollama-compatible endpoint
 on `127.0.0.1`, `localhost`, or `::1`; non-loopback URLs are rejected. A Mistral failure
 never triggers a cloud fallback. OpenAI and Anthropic adapter classes are present as
 interchangeable extension points but deliberately disabled pending an explicit data
 transmission review.
 
-Rule-based mode is deliberately conservative: it normalizes NFC/line endings and cleans
-known copy/paste artifacts. It does not attempt unsafe sentence rewrites. Substantive
-editing requires the local Mistral provider. Unknown invisible characters are reported
-and retained.
+The pure cleanup mode is deliberately conservative: it normalizes NFC/line endings and
+cleans known copy/paste artifacts. The instant editor performs only narrowly scoped,
+audited phrase improvements; any preservation warning discards that draft. Broader
+rewriting remains available through local Mistral. Unknown invisible characters are
+reported and retained.
 
 GitHub stores source code, tests, documentation, and releases only. Pasted text, edited
 results, audit reports, and local logs are never committed or uploaded automatically.
@@ -68,8 +78,8 @@ python -m pip install -e ".[dev,ui]"
 CLI, fully offline:
 
 ```powershell
-editorial-transformer examples\sample.md -o edited.md --provider rules
-Get-Content input.txt -Raw | editorial-transformer --stdin --provider rules
+editorial-transformer examples\sample.md -o edited.md --provider fast-editor
+Get-Content input.txt -Raw | editorial-transformer --stdin --provider fast-editor
 ```
 
 Local Mistral through Ollama:

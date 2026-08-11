@@ -1,17 +1,22 @@
 from __future__ import annotations
 
 import json
-import os
-import urllib.request
 
 import streamlit as st
 import streamlit.components.v2 as components
 
+from app.local_runtime import local_mistral_ready
 from app.models import TransformOptions
 from app.pipeline import run_pipeline
 from app.providers.base import ProviderError
 
 MAX_CHARACTERS = 2_000_000
+
+
+@st.cache_data(ttl=10, show_spinner=False)
+def cached_local_mistral_ready() -> bool:
+    return local_mistral_ready()
+
 
 copy_text_component = components.component(
     "copy_text_button",
@@ -55,18 +60,6 @@ st.markdown(
 )
 
 
-@st.cache_data(ttl=10, show_spinner=False)
-def local_mistral_ready() -> bool:
-    base_url = os.getenv("MISTRAL_BASE_URL", "http://127.0.0.1:11434").rstrip("/")
-    model = os.getenv("MISTRAL_MODEL", "mistral").split(":", 1)[0]
-    try:
-        with urllib.request.urlopen(base_url + "/api/tags", timeout=0.8) as response:
-            data = json.load(response)
-        return any(item.get("name", "").split(":", 1)[0] == model for item in data.get("models", []))
-    except (OSError, ValueError, KeyError):
-        return False
-
-
 def copy_button(text: str) -> None:
     copy_text_component(key="copy-result", data={"text": text}, height=54)
 
@@ -84,11 +77,14 @@ st.markdown(
     "Die Bearbeitung läuft lokal auf diesem PC."
 )
 
-mistral_ready = local_mistral_ready()
+mistral_ready = cached_local_mistral_ready()
 if mistral_ready:
-    st.success("Lokal bereit – sichere Bereinigung und sprachliche Überarbeitung verfügbar.", icon="✅")
+    st.success("Sofortige Textverbesserung bereit; Mistral ist zusätzlich verfügbar.", icon="✅")
 else:
-    st.info("Lokal bereit – derzeit ist nur die sichere Grundbereinigung verfügbar.", icon="ℹ️")
+    st.info(
+        "Sofortige lokale Textverbesserung bereit. Die optionale Mistral-Variante ist nicht verfügbar.",
+        icon="ℹ️",
+    )
 
 with st.expander("Text aus einer Datei öffnen"):
     uploaded = st.file_uploader("TXT- oder Markdown-Datei", type=["txt", "md"], label_visibility="collapsed")
@@ -111,16 +107,26 @@ word_count = len(st.session_state.source_text.split())
 st.caption(f"{word_count:,} Wörter · {len(st.session_state.source_text):,} Zeichen".replace(",", "."))
 
 with st.expander("Bearbeitung anpassen"):
+    mode_choices = (
+        ["Schnell verbessern (empfohlen)", "Nur Format bereinigen", "Gründlich mit Mistral (bis 45 s)"]
+        if mistral_ready
+        else ["Schnell verbessern (empfohlen)", "Nur Format bereinigen"]
+    )
     mode_label = st.radio(
         "Bearbeitung",
-        ["Automatisch (empfohlen)", "Nur sichere Bereinigung", "Deutlich umformulieren"],
+        mode_choices,
         horizontal=True,
     )
-    tone_label = st.selectbox(
-        "Stil",
-        ["Stil beibehalten", "Professionell", "Analytisch", "Kompakt", "Akademisch", "LinkedIn / Artikel"],
-    )
-    custom_style = st.text_input("Eigene Stilvorgabe (optional)", placeholder="z. B. sachlich, kurze Absätze")
+    if mistral_ready and mode_label == "Gründlich mit Mistral (bis 45 s)":
+        tone_label = st.selectbox(
+            "Stil",
+            ["Stil beibehalten", "Professionell", "Analytisch", "Kompakt", "Akademisch", "LinkedIn / Artikel"],
+        )
+        custom_style = st.text_input("Eigene Stilvorgabe (optional)", placeholder="z. B. sachlich, kurze Absätze")
+    else:
+        tone_label = "Stil beibehalten"
+        custom_style = ""
+        st.caption("Stiloptionen gelten nur für die optionale gründliche Mistral-Bearbeitung.")
 
 tone_map = {
     "Stil beibehalten": "professional", "Professionell": "professional",
@@ -128,16 +134,17 @@ tone_map = {
     "LinkedIn / Artikel": "LinkedIn/article",
 }
 
-run = st.button("Text überarbeiten", type="primary", use_container_width=True,
+action_label = "Text verbessern"
+run = st.button(action_label, type="primary", use_container_width=True,
                 disabled=not st.session_state.source_text.strip())
 if run:
-    if mode_label == "Nur sichere Bereinigung":
+    if mode_label == "Nur Format bereinigen":
         provider, strength = "rules", "light"
-    elif mistral_ready:
+    elif mode_label == "Gründlich mit Mistral (bis 45 s)" and mistral_ready:
         provider = "rules+mistral-local"
-        strength = "substantial" if mode_label == "Deutlich umformulieren" else "medium"
+        strength = "substantial"
     else:
-        provider, strength = "rules", "light"
+        provider, strength = "fast-editor", "medium"
     options = TransformOptions(
         provider=provider,
         rewrite_strength=strength,
@@ -148,7 +155,11 @@ if run:
         preserve_quotations=True,
         custom_author_style=custom_style,
     )
-    message = "Lokale Überarbeitung läuft – der erste Durchlauf kann etwa eine Minute dauern."
+    message = (
+        "Gründliche lokale Mistral-Überarbeitung läuft – höchstens 45 Sekunden."
+        if "mistral" in provider
+        else "Text wird sofort lokal verbessert."
+    )
     with st.spinner(message):
         try:
             st.session_state.result = run_pipeline(st.session_state.source_text, options)
@@ -158,15 +169,23 @@ if run:
                 warning.kind == "rewrite_rejected"
                 for warning in st.session_state.result.audit.fact_preservation_warnings
             )
-            if was_rejected:
+            provider_fallback = any(
+                warning.kind == "provider_unavailable"
+                for warning in st.session_state.result.audit.fact_preservation_warnings
+            )
+            if provider_fallback:
+                st.session_state.processing_note = "Mistral war nicht rechtzeitig verfügbar; sicher bereinigt."
+            elif was_rejected:
                 st.session_state.processing_note = "Lokal sicher bereinigt; die Modellfassung wurde verworfen."
             elif "mistral" in provider:
                 st.session_state.processing_note = "Lokal mit Regeln und Mistral verarbeitet."
+            elif provider == "fast-editor":
+                st.session_state.processing_note = "Sofort und vollständig lokal verbessert."
             else:
                 st.session_state.processing_note = "Lokal mit sicheren Regeln bereinigt. Das Sprachmodell war nicht aktiv."
         except ProviderError as error:
             st.session_state.result = None
-            st.error("Das lokale Sprachmodell antwortet gerade nicht. Dein Text wurde nicht gesendet.")
+            st.error("Das lokale Sprachmodell antwortet gerade nicht. Dein Text hat diesen PC nicht verlassen.")
             with st.expander("Technische Information"):
                 st.code(str(error))
 
@@ -181,8 +200,10 @@ if result is not None:
     copy_button(st.session_state.editable_result)
 
     warning_count = len(result.audit.fact_preservation_warnings)
-    rejected = any(warning.kind == "rewrite_rejected" for warning in result.audit.fact_preservation_warnings)
-    if rejected:
+    warning_kinds = {warning.kind for warning in result.audit.fact_preservation_warnings}
+    if "provider_unavailable" in warning_kinds:
+        st.warning("Mistral war nicht rechtzeitig verfügbar. Das sicher bereinigte Ergebnis wird angezeigt.")
+    elif "rewrite_rejected" in warning_kinds:
         st.warning("Die sprachliche Fassung wurde vorsichtshalber verworfen. Der sicher bereinigte Text wird angezeigt.")
     elif warning_count:
         st.warning(f"Bitte kurz prüfen: {warning_count} mögliche Abweichung(en) wurden gefunden.")

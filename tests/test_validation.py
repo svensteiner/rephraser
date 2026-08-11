@@ -22,3 +22,14 @@ def test_detects_added_claim_and_changed_url_embedding() -> None:
     kinds = {warning.kind for warning in warnings}
     assert "altered_citation_format" in kinds
     assert "unsupported_new_claim" in kinds
+
+
+def test_duplicate_protected_fact_is_rejected() -> None:
+    original = "Die Marge beträgt 12,5 %."
+    constraints = extract_semantics(original)
+    warnings = validate_preservation(
+        original,
+        "Die Marge beträgt 12,5 %. Die Marge beträgt 12,5 %.",
+        constraints,
+    )
+    assert any(w.kind == "altered_number_count" for w in warnings)

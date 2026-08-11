@@ -3,59 +3,41 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 import sys
 import threading
-import urllib.error
-import urllib.request
-from urllib.parse import urlparse
+import time
 
+from app.local_runtime import local_mistral_ready
 from app.models import TransformOptions
 from app.pipeline import run_pipeline
 from app.providers.base import ProviderError
 
 
-MODE_AUTOMATIC = "Automatisch (empfohlen)"
-MODE_SAFE = "Nur sichere Bereinigung"
-MODE_STRONG = "Deutlich umformulieren"
-
-
-def local_mistral_ready(timeout: float = 0.8) -> bool:
-    """Check the configured loopback Ollama endpoint without sending user text."""
-    base_url = os.getenv("MISTRAL_BASE_URL", "http://127.0.0.1:11434").rstrip("/")
-    model = os.getenv("MISTRAL_MODEL", "mistral").split(":", 1)[0]
-    parsed = urlparse(base_url)
-    if (
-        parsed.scheme != "http"
-        or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}
-        or parsed.username is not None
-        or parsed.password is not None
-        or parsed.query
-        or parsed.fragment
-    ):
-        return False
-
-    class NoRedirect(urllib.request.HTTPRedirectHandler):
-        def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[no-untyped-def]
-            return None
-
-    try:
-        opener = urllib.request.build_opener(NoRedirect)
-        with opener.open(base_url + "/api/tags", timeout=timeout) as response:
-            payload = json.load(response)
-        return any(item.get("name", "").split(":", 1)[0] == model for item in payload.get("models", []))
-    except (OSError, ValueError, KeyError, urllib.error.URLError):
-        return False
+MODE_AUTOMATIC = "Schnell verbessern (empfohlen)"
+MODE_SAFE = "Nur Format bereinigen"
+MODE_STRONG = "Gründlich mit Mistral (bis 45 s)"
+MAX_CHARACTERS = 2_000_000
 
 
 def processing_settings(mode: str, mistral_ready: bool) -> tuple[str, str]:
     """Map user-facing choices to safe internal provider settings."""
     if mode == MODE_SAFE or not mistral_ready:
-        return "rules", "light"
+        return ("rules", "light") if mode == MODE_SAFE else ("fast-editor", "medium")
     if mode == MODE_STRONG:
         return "rules+mistral-local", "substantial"
-    return "rules+mistral-local", "medium"
+    return "fast-editor", "medium"
+
+
+def available_modes(mistral_ready: bool) -> tuple[str, ...]:
+    """Expose only choices that are actually available on this computer."""
+    if not mistral_ready:
+        return (MODE_AUTOMATIC, MODE_SAFE)
+    return (MODE_AUTOMATIC, MODE_SAFE, MODE_STRONG)
+
+
+def primary_action_label(mistral_ready: bool) -> str:
+    return "Text verbessern"
 
 
 def run_self_test() -> dict[str, object]:
@@ -64,10 +46,14 @@ def run_self_test() -> dict[str, object]:
     result = run_pipeline(source, TransformOptions(provider="rules", rewrite_strength="light"))
     expected = "Grüße aus Wien – 12,5 % am 3. März 2026."
     protected = all(value in result.rewritten_text for value in ("Grüße", "12,5 %", "3. März 2026"))
+    fast_source = "We would like to better understand the accounts."
+    fast_result = run_pipeline(fast_source, TransformOptions(provider="fast-editor"))
+    fast_editor = fast_result.rewritten_text == "We would appreciate clarification on the accounts."
     return {
-        "ok": result.rewritten_text == expected and protected,
+        "ok": result.rewritten_text == expected and protected and fast_editor,
         "safe_cleanup": result.rewritten_text == expected,
         "protected_values": protected,
+        "fast_editor": fast_editor,
         "mistral_available": local_mistral_ready(),
     }
 
@@ -88,6 +74,9 @@ class DesktopApp:
         self.root.minsize(760, 620)
         self.root.configure(background="#f4f7f5")
         self.mistral_ready = local_mistral_ready()
+        self.processed_source: str | None = None
+        self.processing_active = False
+        self.processing_started = 0.0
 
         style = ttk.Style(self.root)
         style.theme_use("vista" if "vista" in style.theme_names() else style.theme_use())
@@ -107,9 +96,9 @@ class DesktopApp:
         ).pack(anchor="w", pady=(2, 12))
 
         status_text = (
-            "✓ Lokale sprachliche Überarbeitung ist verfügbar."
+            "✓ Sofortige Textverbesserung bereit; Mistral ist zusätzlich verfügbar."
             if self.mistral_ready
-            else "ℹ Sichere Grundbereinigung verfügbar; lokales Sprachmodell nicht gefunden."
+            else "✓ Sofortige lokale Textverbesserung bereit; Mistral ist optional."
         )
         self.system_status = ttk.Label(outer, text=status_text, style="Status.TLabel")
         self.system_status.pack(fill="x", pady=(0, 12))
@@ -118,8 +107,18 @@ class DesktopApp:
         top_line.pack(fill="x")
         ttk.Label(top_line, text="Dein Text", font=("Segoe UI", 11, "bold")).pack(side="left")
         ttk.Button(top_line, text="Datei öffnen", command=self.open_file, style="Secondary.TButton").pack(side="right")
+        self.paste_button = ttk.Button(
+            top_line,
+            text="Aus Zwischenablage einfügen",
+            command=self.paste_clipboard,
+            style="Secondary.TButton",
+        )
+        self.paste_button.pack(side="right", padx=(0, 8))
         self.input_text = scrolledtext.ScrolledText(outer, height=10, wrap="word", font=("Segoe UI", 11), undo=True)
-        self.input_text.pack(fill="both", expand=True, pady=(6, 10))
+        self.input_text.pack(fill="both", expand=True, pady=(6, 3))
+        self.input_text.bind("<<Modified>>", self._source_changed)
+        self.source_count = tk.StringVar(value="0 Wörter · 0 Zeichen")
+        ttk.Label(outer, textvariable=self.source_count, style="Hint.TLabel").pack(anchor="e", pady=(0, 8))
 
         controls = ttk.Frame(outer)
         controls.pack(fill="x", pady=(0, 10))
@@ -128,13 +127,16 @@ class DesktopApp:
         self.mode_box = ttk.Combobox(
             controls,
             textvariable=self.mode,
-            values=(MODE_AUTOMATIC, MODE_SAFE, MODE_STRONG),
+            values=available_modes(self.mistral_ready),
             state="readonly",
             width=28,
         )
         self.mode_box.pack(side="left", padx=(8, 14))
         self.run_button = ttk.Button(
-            controls, text="Text überarbeiten", command=self.start_processing, style="Primary.TButton"
+            controls,
+            text=primary_action_label(self.mistral_ready),
+            command=self.start_processing,
+            style="Primary.TButton",
         )
         self.run_button.pack(side="right")
         self.progress = ttk.Progressbar(controls, mode="indeterminate", length=150)
@@ -152,7 +154,11 @@ class DesktopApp:
 
         bottom = ttk.Frame(outer)
         bottom.pack(fill="x")
-        self.result_status = ttk.Label(bottom, text="Text einfügen und auf „Text überarbeiten“ klicken.", style="Hint.TLabel")
+        self.result_status = ttk.Label(
+            bottom,
+            text=f"Text einfügen und auf „{primary_action_label(self.mistral_ready)}“ klicken.",
+            style="Hint.TLabel",
+        )
         self.result_status.pack(side="left")
         ttk.Button(bottom, text="Leeren", command=self.clear_all, style="Secondary.TButton").pack(side="right")
         ttk.Button(bottom, text="Speichern", command=self.save_result, style="Secondary.TButton").pack(
@@ -163,6 +169,42 @@ class DesktopApp:
         self.root.bind("<Control-Shift-C>", lambda _event: self.copy_result())
         self.input_text.focus_set()
 
+    def _set_source_text(self, content: str) -> None:
+        if len(content) > MAX_CHARACTERS:
+            self.messagebox.showerror(
+                "Text zu lang",
+                f"Der Text hat mehr als {MAX_CHARACTERS:,} Zeichen und kann nicht verarbeitet werden.".replace(",", "."),
+            )
+            return
+        self.input_text.delete("1.0", "end")
+        self.input_text.insert("1.0", content)
+        self.input_text.edit_modified(False)
+        self._update_source_state()
+
+    def paste_clipboard(self) -> None:
+        try:
+            content = self.root.clipboard_get()
+        except self.tk.TclError:
+            self.messagebox.showinfo("Zwischenablage leer", "In der Zwischenablage wurde kein Text gefunden.")
+            return
+        self._set_source_text(content)
+        self.input_text.focus_set()
+
+    def _source_changed(self, _event: object | None = None) -> None:
+        if not self.input_text.edit_modified():
+            return
+        self.input_text.edit_modified(False)
+        self._update_source_state()
+
+    def _update_source_state(self) -> None:
+        source = self.input_text.get("1.0", "end-1c")
+        self.source_count.set(
+            f"{len(source.split()):,} Wörter · {len(source):,} Zeichen".replace(",", ".")
+        )
+        if self.processed_source is not None and source != self.processed_source:
+            self.copy_button.configure(state="disabled")
+            self.result_status.configure(text="Ausgangstext geändert – bitte erneut bearbeiten.")
+
     def open_file(self) -> None:
         path = self.filedialog.askopenfilename(filetypes=(("Text und Markdown", "*.txt *.md"), ("Alle Dateien", "*.*")))
         if not path:
@@ -172,8 +214,7 @@ class DesktopApp:
         except (OSError, UnicodeError) as error:
             self.messagebox.showerror("Datei nicht lesbar", f"Die Datei konnte nicht geöffnet werden.\n\n{error}")
             return
-        self.input_text.delete("1.0", "end")
-        self.input_text.insert("1.0", content)
+        self._set_source_text(content)
 
     def start_processing(self) -> None:
         source = self.input_text.get("1.0", "end-1c")
@@ -181,13 +222,35 @@ class DesktopApp:
             self.messagebox.showinfo("Text fehlt", "Bitte zuerst einen Text einfügen.")
             self.input_text.focus_set()
             return
+        if len(source) > MAX_CHARACTERS:
+            self.messagebox.showerror(
+                "Text zu lang",
+                f"Bitte höchstens {MAX_CHARACTERS:,} Zeichen verwenden.".replace(",", "."),
+            )
+            return
         self.run_button.configure(state="disabled")
         self.copy_button.configure(state="disabled")
-        self.progress.start(12)
-        self.result_status.configure(text="Lokale Bearbeitung läuft …")
+        self.input_text.configure(state="disabled")
+        self.mode_box.configure(state="disabled")
         provider, strength = processing_settings(self.mode.get(), self.mistral_ready)
+        self.progress.start(12)
+        self.processing_active = "mistral" in provider
+        if self.processing_active:
+            self.processing_started = time.monotonic()
+            self._update_elapsed_time()
+        else:
+            self.result_status.configure(text="Text wird sofort lokal verbessert …")
         thread = threading.Thread(target=self._worker, args=(source, provider, strength), daemon=True)
         thread.start()
+
+    def _update_elapsed_time(self) -> None:
+        if not self.processing_active:
+            return
+        elapsed = int(time.monotonic() - self.processing_started)
+        self.result_status.configure(
+            text=f"Lokale Überarbeitung läuft … {elapsed} s (höchstens 45 s)"
+        )
+        self.root.after(1000, self._update_elapsed_time)
 
     def _worker(self, source: str, provider: str, strength: str) -> None:
         try:
@@ -206,28 +269,39 @@ class DesktopApp:
         self.root.after(0, self._show_result, result, provider)
 
     def _show_result(self, result: object, provider: str) -> None:
+        self.processing_active = False
         self.progress.stop()
         self.run_button.configure(state="normal")
+        self.input_text.configure(state="normal")
+        self.mode_box.configure(state="readonly")
         rewritten = result.rewritten_text
         self.output_text.delete("1.0", "end")
         self.output_text.insert("1.0", rewritten)
+        self.processed_source = self.input_text.get("1.0", "end-1c")
         self.copy_button.configure(state="normal")
-        rejected = any(warning.kind == "rewrite_rejected" for warning in result.audit.fact_preservation_warnings)
-        if rejected:
+        warning_kinds = {warning.kind for warning in result.audit.fact_preservation_warnings}
+        if "provider_unavailable" in warning_kinds:
+            message = "Mistral war nicht rechtzeitig verfügbar; sicher bereinigtes Ergebnis angezeigt."
+        elif "rewrite_rejected" in warning_kinds:
             message = "Sicher bereinigt; eine unsichere Modellfassung wurde verworfen."
         elif result.audit.fact_preservation_warnings:
             message = f"Fertig – bitte {len(result.audit.fact_preservation_warnings)} Prüfhinweis(e) beachten."
         elif "mistral" in provider:
             message = "Fertig – lokal überarbeitet; geschützte Angaben ohne Auffälligkeit."
+        elif provider == "fast-editor":
+            message = "Fertig – sofort und vollständig lokal verbessert."
         else:
-            message = "Fertig – lokal sicher bereinigt."
+            message = "Fertig – Formatierungsartefakte bereinigt; der Text wurde nicht sprachlich umformuliert."
         self.result_status.configure(text=message)
 
     def _show_error(self, error: Exception) -> None:
+        self.processing_active = False
         self.progress.stop()
         self.run_button.configure(state="normal")
+        self.input_text.configure(state="normal")
+        self.mode_box.configure(state="readonly")
         if isinstance(error, ProviderError):
-            message = "Das lokale Sprachmodell antwortet nicht. Der Text wurde nicht versendet."
+            message = "Das lokale Sprachmodell antwortet nicht. Der Text hat diesen PC nicht verlassen."
         else:
             message = "Die Bearbeitung konnte nicht abgeschlossen werden. Der eingegebene Text bleibt erhalten."
         self.result_status.configure(text=message)
@@ -263,7 +337,11 @@ class DesktopApp:
         self.input_text.delete("1.0", "end")
         self.output_text.delete("1.0", "end")
         self.copy_button.configure(state="disabled")
-        self.result_status.configure(text="Text einfügen und auf „Text überarbeiten“ klicken.")
+        self.processed_source = None
+        self.source_count.set("0 Wörter · 0 Zeichen")
+        self.result_status.configure(
+            text=f"Text einfügen und auf „{primary_action_label(self.mistral_ready)}“ klicken."
+        )
         self.input_text.focus_set()
 
     def run(self) -> None:

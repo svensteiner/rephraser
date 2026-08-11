@@ -36,7 +36,7 @@ class TransformOptions(BaseModel):
     preserve_numbers: bool = True
     preserve_quotations: bool = True
     custom_author_style: str = ""
-    provider: str = "local"
+    provider: str = "fast-editor"
 
 
 class CharacterFinding(BaseModel):

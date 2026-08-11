@@ -13,13 +13,13 @@ from .models import TransformRequest, TransformResult
 from .pipeline import run_pipeline
 from .providers.base import ProviderError
 
-app = FastAPI(title="Editorial Transformer", version="1.0.0",
+app = FastAPI(title="Editorial Transformer", version="1.1.0",
     description="Local-first editorial rewriting and semantic-preservation auditing. No AI detector score.")
 
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "default_provider": "rules"}
+    return {"status": "ok", "default_provider": "fast-editor"}
 
 
 @app.post("/transform", response_model=TransformResult)
@@ -40,7 +40,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("input", nargs="?", type=Path)
     parser.add_argument("--stdin", action="store_true")
     parser.add_argument("-o", "--output", type=Path)
-    parser.add_argument("--provider", choices=["rules", "mistral-local"], default="rules")
+    parser.add_argument("--provider", choices=["fast-editor", "rules", "mistral-local"], default="fast-editor")
     parser.add_argument("--tone", default="professional")
     parser.add_argument("--strength", choices=["light", "medium", "substantial"], default="medium")
     parser.add_argument("--language", choices=["German", "English", "auto-detect"], default="auto-detect")

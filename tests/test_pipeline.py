@@ -10,6 +10,24 @@ class UnsafeMistralStub(EditorialProvider):
         return text.replace("12,5 %", "15 Prozent") + " Neue unbelegte Behauptung."
 
 
+class HarmlessUrlFormattingStub(EditorialProvider):
+    name = "mistral-test"
+
+    def rewrite(self, text, constraints, options):
+        return text.replace("Die Marge betrug", "Die Marge lag").replace(
+            "https://example.com/x", "<https://example.com/x>"
+        )
+
+
+class UnavailableMistralStub(EditorialProvider):
+    name = "mistral-test"
+
+    def rewrite(self, text, constraints, options):
+        from app.providers.base import ProviderError
+
+        raise ProviderError("timed out")
+
+
 def test_rules_preserve_protected_content_and_umlauts() -> None:
     text = ('Es ist wichtig zu beachten, dass Jörg Müller am 31.12.2025 „Grüße“ sagte. '
             'Der Wert war 1.250,50 EUR (12,5 %). https://example.com/x')
@@ -64,3 +82,21 @@ def test_unsafe_mistral_result_is_rejected_safely() -> None:
     result = run_pipeline(text, TransformOptions(provider="rules"), provider=UnsafeMistralStub())
     assert result.rewritten_text == text
     assert any(warning.kind == "rewrite_rejected" for warning in result.audit.fact_preservation_warnings)
+
+
+def test_harmless_added_url_autolink_is_repaired_before_validation() -> None:
+    text = "Die Marge betrug 12,5 %. Quelle: https://example.com/x"
+    result = run_pipeline(
+        text,
+        TransformOptions(provider="rules"),
+        provider=HarmlessUrlFormattingStub(),
+    )
+    assert result.rewritten_text == "Die Marge lag 12,5 %. Quelle: https://example.com/x"
+    assert result.audit.fact_preservation_warnings == []
+
+
+def test_unavailable_mistral_returns_safe_result_instead_of_hanging_or_failing() -> None:
+    text = "Grüße\u00a0aus Wien – 12,5 %."
+    result = run_pipeline(text, TransformOptions(provider="rules"), provider=UnavailableMistralStub())
+    assert result.rewritten_text == "Grüße aus Wien – 12,5 %."
+    assert any(w.kind == "provider_unavailable" for w in result.audit.fact_preservation_warnings)
