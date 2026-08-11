@@ -56,11 +56,11 @@ jobs:
 
           1. TextVerbessern.exe doppelklicken.
           2. Text einfügen.
-          3. Text überarbeiten anklicken.
+          3. Text verbessern anklicken.
           4. Ergebnis kopieren.
 
-          Die Grundbereinigung funktioniert ohne Installation.
-          Für eine sprachliche Überarbeitung muss Ollama mit dem Modell mistral lokal laufen.
+          "Schnell verbessern" funktioniert sofort und ohne Installation.
+          "Gründlich mit Mistral" ist optional und benötigt ein lokal laufendes Ollama-Modell.
           Es gibt keinen Cloud-Fallback.
           "@ | Set-Content portable\STARTEN.txt -Encoding UTF8
           Compress-Archive -Path portable\* -DestinationPath TextVerbessern-Windows.zip -Force
