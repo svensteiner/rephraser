@@ -29,6 +29,8 @@ Wenn nur Formatierungs- und Unicode-Fehler entfernt werden sollen, wähle unter
 
 **Gründlich mit Mistral** ist optional und kann bis zu 45 Sekunden dauern. Antwortet
 das lokale Modell nicht rechtzeitig, erscheint automatisch die sichere Fassung.
+Bei Texten über 12.000 Zeichen wird automatisch die vollständige schnelle lokale Bearbeitung
+verwendet; der Text wird dabei nicht abgeschnitten.
 
 Eingefügte Texte, Ergebnisse und Prüfberichte werden nicht automatisch auf GitHub oder
 an einen anderen Speicherort übertragen.

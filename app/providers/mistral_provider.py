@@ -7,7 +7,12 @@ import threading
 import urllib.error
 import urllib.request
 
-from app.local_runtime import InvalidLocalRuntimeUrl, NoRedirect, validate_loopback_base_url
+from app.local_runtime import (
+    LOCAL_MODEL_MAX_CHARACTERS,
+    InvalidLocalRuntimeUrl,
+    NoRedirect,
+    validate_loopback_base_url,
+)
 from app.models import SemanticConstraints, TransformOptions
 from app.providers.base import EditorialProvider, ProviderError
 
@@ -16,7 +21,7 @@ class LocalMistralProvider(EditorialProvider):
     """Local Ollama-compatible Mistral adapter. Requests are restricted to loopback."""
 
     name = "mistral-local"
-    max_characters = 12_000
+    max_characters = LOCAL_MODEL_MAX_CHARACTERS
 
     def __init__(self, base_url: str | None = None, model: str | None = None) -> None:
         try:
@@ -24,7 +29,7 @@ class LocalMistralProvider(EditorialProvider):
                 base_url or os.getenv("MISTRAL_BASE_URL", "http://127.0.0.1:11434")
             )
         except InvalidLocalRuntimeUrl as error:
-            raise ProviderError(str(error)) from error
+            raise ProviderError(str(error), code="invalid_local_url") from error
         self.model = model or os.getenv("MISTRAL_MODEL", "mistral")
         try:
             configured_timeout = float(os.getenv("MISTRAL_TIMEOUT_SECONDS", "45"))
@@ -59,7 +64,8 @@ class LocalMistralProvider(EditorialProvider):
                     pass
             raise ProviderError(
                 f"Local Mistral exceeded the {self.timeout:g}-second total deadline; "
-                "no cloud fallback was attempted."
+                "no cloud fallback was attempted.",
+                code="provider_timeout",
             )
         status, value = completed.get_nowait()
         if status == "error":
@@ -70,7 +76,8 @@ class LocalMistralProvider(EditorialProvider):
         if len(text) > self.max_characters:
             raise ProviderError(
                 f"Text exceeds the {self.max_characters:,}-character local model limit; ".replace(",", ".")
-                + "safe cleanup is still available."
+                + "safe cleanup is still available.",
+                code="model_input_too_long",
             )
         mandatory_values = list(constraints.names)
         if options.preserve_numbers:
@@ -114,13 +121,18 @@ class LocalMistralProvider(EditorialProvider):
         try:
             raw = self._request_with_deadline(request)
             if len(raw) > 5_000_000:
-                raise ProviderError("Local Mistral response exceeds the 5 MB safety limit.")
+                raise ProviderError(
+                    "Local Mistral response exceeds the 5 MB safety limit.", code="invalid_model_response"
+                )
             payload = json.loads(raw)
         except (OSError, urllib.error.URLError, json.JSONDecodeError) as error:
-            raise ProviderError(f"Local Mistral request failed; no cloud fallback was attempted: {error}") from error
+            raise ProviderError(
+                f"Local Mistral request failed; no cloud fallback was attempted: {error}",
+                code="provider_unavailable",
+            ) from error
         if not isinstance(payload, dict) or not isinstance(payload.get("response"), str):
-            raise ProviderError("Local Mistral returned an invalid response schema.")
+            raise ProviderError("Local Mistral returned an invalid response schema.", code="invalid_model_response")
         rewritten = payload["response"].strip()
         if not rewritten:
-            raise ProviderError("Local Mistral returned no text.")
+            raise ProviderError("Local Mistral returned no text.", code="invalid_model_response")
         return rewritten

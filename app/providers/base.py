@@ -8,6 +8,10 @@ from app.models import SemanticConstraints, TransformOptions
 class ProviderError(RuntimeError):
     """Raised when a selected provider cannot safely complete a rewrite."""
 
+    def __init__(self, message: str, *, code: str = "provider_unavailable") -> None:
+        super().__init__(message)
+        self.code = code
+
 
 class EditorialProvider(ABC):
     name: str

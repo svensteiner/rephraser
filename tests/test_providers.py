@@ -117,7 +117,20 @@ def test_mistral_enforces_wall_clock_deadline_and_closes_slow_response(monkeypat
     provider = LocalMistralProvider()
     provider.timeout = 0.05
     started = time.monotonic()
-    with pytest.raises(ProviderError, match="total deadline"):
+    with pytest.raises(ProviderError, match="total deadline") as captured_error:
         provider.rewrite("Ein Satz.", extract_semantics("Ein Satz."), TransformOptions())
+    assert captured_error.value.code == "provider_timeout"
     assert time.monotonic() - started < 0.5
     assert closed.wait(0.5)
+
+
+def test_mistral_reports_oversized_input_before_any_network_call(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "urllib.request.build_opener",
+        lambda *handlers: (_ for _ in ()).throw(AssertionError("network must not be touched")),
+    )
+    provider = LocalMistralProvider()
+    text = "x" * (provider.max_characters + 1)
+    with pytest.raises(ProviderError) as captured_error:
+        provider.rewrite(text, extract_semantics(text), TransformOptions())
+    assert captured_error.value.code == "model_input_too_long"

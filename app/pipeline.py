@@ -19,7 +19,7 @@ from .rewrite import rewrite_text
 from .semantic import extract_semantics
 from .validation import validate_preservation
 
-PIPELINE_VERSION = "1.4.2"
+PIPELINE_VERSION = "1.5.0"
 
 
 def _code_points(value: str) -> list[str]:
@@ -77,18 +77,55 @@ def run_pipeline(text: str, options: TransformOptions | None = None,
         if "mistral" not in active_provider.name:
             raise
         provider_failure = error
-        rewritten = LocalRuleProvider().rewrite(text, semantics, selected)
-        applied_provider = LocalRuleProvider.name
+        if error.code == "model_input_too_long":
+            rewritten = FastEditorialProvider().rewrite(text, semantics, selected)
+            applied_provider = FastEditorialProvider.name
+        else:
+            rewritten = LocalRuleProvider().rewrite(text, semantics, selected)
+            applied_provider = LocalRuleProvider.name
     warnings = validate_preservation(text, rewritten, semantics,
         preserve_numbers=selected.preserve_numbers, preserve_citations=selected.preserve_citations,
         preserve_quotations=selected.preserve_quotations)
     if provider_failure is not None:
+        if applied_provider == FastEditorialProvider.name and warnings:
+            rejection_kinds = sorted({warning.kind for warning in warnings})
+            rewritten = LocalRuleProvider().rewrite(text, semantics, selected)
+            applied_provider = LocalRuleProvider.name
+            warnings = validate_preservation(
+                text, rewritten, semantics,
+                preserve_numbers=selected.preserve_numbers,
+                preserve_citations=selected.preserve_citations,
+                preserve_quotations=selected.preserve_quotations,
+            )
+            warnings.append(ValidationWarning(
+                kind="rewrite_rejected",
+                severity="medium",
+                value=", ".join(rejection_kinds),
+                message=("Die lokale Schnellbearbeitung wurde wegen möglicher inhaltlicher Änderungen "
+                         "verworfen. Ausgegeben wurde nur die sichere Grundbereinigung."),
+            ))
+        failure_kind = {
+            "model_input_too_long": "model_input_too_long",
+            "provider_timeout": "provider_timeout",
+        }.get(provider_failure.code, "provider_unavailable")
+        failure_message = {
+            "model_input_too_long": (
+                "Der Text ist für einen einzelnen lokalen Modelldurchlauf zu lang. "
+                "Ausgegeben wurde die sichere lokale Schnellbearbeitung."
+            ),
+            "provider_timeout": (
+                "Das lokale Sprachmodell hat die Gesamtdauer überschritten. "
+                "Ausgegeben wurde nur die sichere Grundbereinigung."
+            ),
+        }.get(
+            provider_failure.code,
+            "Das lokale Sprachmodell war nicht verfügbar. Ausgegeben wurde nur die sichere Grundbereinigung.",
+        )
         warnings.append(ValidationWarning(
-            kind="provider_unavailable",
+            kind=failure_kind,
             severity="medium",
-            value=type(provider_failure).__name__,
-            message=("Das lokale Sprachmodell war nicht rechtzeitig verfügbar. "
-                     "Ausgegeben wurde nur die sichere Grundbereinigung."),
+            value=provider_failure.code,
+            message=failure_message,
         ))
     elif ("mistral" in active_provider.name or active_provider.name == "fast-editor") and warnings:
         rejection_kinds = sorted({warning.kind for warning in warnings})

@@ -217,3 +217,20 @@ def test_name_context_swap_is_rejected_by_pipeline() -> None:
     assert result.rewritten_text == text
     rejection = next(w for w in result.audit.fact_preservation_warnings if w.kind == "rewrite_rejected")
     assert "reassigned_proper_name_context" in rejection.value
+
+
+def test_long_mistral_input_falls_back_with_truthful_reason_without_network(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "urllib.request.build_opener",
+        lambda *handlers: (_ for _ in ()).throw(AssertionError("network must not be touched")),
+    )
+    text = "We would like to better understand the report.\n\n" + (
+        "# Bericht\n\n- Vollständiger Absatz mit Umlauten und Emoji 🧾.\n\n" * 250
+    )
+    result = run_pipeline(text, TransformOptions(provider="mistral-local", rewrite_strength="substantial"))
+    assert result.rewritten_text.startswith("We would appreciate clarification on the report.")
+    assert "🧾" in result.rewritten_text
+    assert result.audit.requested_provider == "mistral-local"
+    assert result.audit.applied_provider == "fast-editor"
+    warning = next(w for w in result.audit.fact_preservation_warnings if w.kind == "model_input_too_long")
+    assert warning.value == "model_input_too_long"

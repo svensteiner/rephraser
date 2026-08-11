@@ -8,7 +8,7 @@ import sys
 import threading
 import time
 
-from app.local_runtime import local_mistral_ready
+from app.local_runtime import LOCAL_MODEL_MAX_CHARACTERS, local_mistral_ready, local_model_eligible
 from app.diagnostics import write_diagnostic_event
 from app.models import TransformOptions
 from app.pipeline import run_pipeline
@@ -215,6 +215,15 @@ class DesktopApp:
         self.source_count.set(
             f"{len(source.split()):,} Wörter · {len(source):,} Zeichen".replace(",", ".")
         )
+        mistral_for_text = local_model_eligible(source, self.mistral_ready)
+        self.mode_box.configure(values=available_modes(mistral_for_text))
+        if self.mode.get() == MODE_STRONG and not mistral_for_text:
+            self.mode.set(MODE_AUTOMATIC)
+            if len(source) > LOCAL_MODEL_MAX_CHARACTERS:
+                self.result_status.configure(
+                    text=(f"Text über {LOCAL_MODEL_MAX_CHARACTERS:,} Zeichen – schnelle lokale Bearbeitung aktiv."
+                          .replace(",", "."))
+                )
         if self.processed_source is not None and source != self.processed_source:
             self.copy_button.configure(state="disabled")
             self.result_status.configure(text="Ausgangstext geändert – bitte erneut bearbeiten.")
@@ -305,7 +314,11 @@ class DesktopApp:
         self.copy_button.configure(state="normal")
         self.copy_button.focus_set()
         warning_kinds = {warning.kind for warning in result.audit.fact_preservation_warnings}
-        if "provider_unavailable" in warning_kinds:
+        if "model_input_too_long" in warning_kinds:
+            message = "Text war für Mistral zu lang; vollständig lokal schnell bearbeitet."
+        elif "provider_timeout" in warning_kinds:
+            message = "Mistral hat die Zeitgrenze erreicht; sicher bereinigtes Ergebnis angezeigt."
+        elif "provider_unavailable" in warning_kinds:
             message = "Mistral war nicht rechtzeitig verfügbar; sicher bereinigtes Ergebnis angezeigt."
         elif "rewrite_rejected" in warning_kinds:
             message = "Sicher bereinigt; eine unsichere Modellfassung wurde verworfen."

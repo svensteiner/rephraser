@@ -5,7 +5,7 @@ import json
 import streamlit as st
 import streamlit.components.v2 as components
 
-from app.local_runtime import local_mistral_ready
+from app.local_runtime import LOCAL_MODEL_MAX_CHARACTERS, local_mistral_ready, local_model_eligible
 from app.models import TransformOptions
 from app.pipeline import run_pipeline
 from app.providers.base import ProviderError
@@ -108,9 +108,10 @@ word_count = len(st.session_state.source_text.split())
 st.caption(f"{word_count:,} Wörter · {len(st.session_state.source_text):,} Zeichen".replace(",", "."))
 
 with st.expander("Bearbeitung anpassen"):
+    mistral_for_text = local_model_eligible(st.session_state.source_text, mistral_ready)
     mode_choices = (
         ["Schnell verbessern (empfohlen)", "Nur Format bereinigen", "Gründlich mit Mistral (bis 45 s)"]
-        if mistral_ready
+        if mistral_for_text
         else ["Schnell verbessern (empfohlen)", "Nur Format bereinigen"]
     )
     mode_label = st.radio(
@@ -118,6 +119,11 @@ with st.expander("Bearbeitung anpassen"):
         mode_choices,
         horizontal=True,
     )
+    if mistral_ready and not mistral_for_text and len(st.session_state.source_text) > LOCAL_MODEL_MAX_CHARACTERS:
+        st.caption(
+            f"Für Texte über {LOCAL_MODEL_MAX_CHARACTERS:,} Zeichen ist die schnelle lokale Bearbeitung aktiv. "
+            "Der vollständige Text bleibt erhalten.".replace(",", ".")
+        )
     language_label = st.selectbox("Sprache", ["Automatisch erkennen", "Deutsch", "Englisch"])
     if mistral_ready and mode_label == "Gründlich mit Mistral (bis 45 s)":
         tone_label = st.selectbox(
@@ -184,10 +190,15 @@ if run:
                 for warning in st.session_state.result.audit.fact_preservation_warnings
             )
             provider_fallback = any(
-                warning.kind == "provider_unavailable"
+                warning.kind in {"provider_unavailable", "provider_timeout", "model_input_too_long"}
                 for warning in st.session_state.result.audit.fact_preservation_warnings
             )
-            if provider_fallback:
+            if any(
+                warning.kind == "model_input_too_long"
+                for warning in st.session_state.result.audit.fact_preservation_warnings
+            ):
+                st.session_state.processing_note = "Text war für Mistral zu lang; vollständig lokal schnell bearbeitet."
+            elif provider_fallback:
                 st.session_state.processing_note = "Mistral war nicht rechtzeitig verfügbar; sicher bereinigt."
             elif was_rejected:
                 st.session_state.processing_note = "Lokal sicher bereinigt; die Modellfassung wurde verworfen."
@@ -238,6 +249,10 @@ if result is not None:
         st.info("Ergebnis manuell geändert – die automatische Prüfung gilt für diese Fassung nicht mehr.")
     elif result_state == ResultState.STALE:
         st.info("Das angezeigte Ergebnis gehört zum vorherigen Ausgangstext und kann nicht gespeichert werden.")
+    elif "model_input_too_long" in warning_kinds:
+        st.info("Der Text war für einen Modelldurchlauf zu lang. Die vollständige sichere Fassung wird angezeigt.")
+    elif "provider_timeout" in warning_kinds:
+        st.warning("Mistral hat die Zeitgrenze erreicht. Das sicher bereinigte Ergebnis wird angezeigt.")
     elif "provider_unavailable" in warning_kinds:
         st.warning("Mistral war nicht rechtzeitig verfügbar. Das sicher bereinigte Ergebnis wird angezeigt.")
     elif "rewrite_rejected" in warning_kinds:

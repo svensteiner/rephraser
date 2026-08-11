@@ -152,6 +152,11 @@ Local Mistral calls have both socket limits and a hard wall-clock deadline. If t
 unavailable or responds too slowly, the application returns conservative local cleanup and never
 falls back to a cloud service.
 
+The optional single-pass Mistral mode is offered for inputs up to 12,000 characters. Longer
+documents remain fully supported by the fast local editor and safe Unicode/format cleanup; the UI
+selects that path before processing and the audit records `model_input_too_long` for direct API
+requests. No document is truncated and no hidden network request is attempted at the boundary.
+
 The Windows download uses a portable folder build for faster startup. Keep `TextVerbessern.exe`
 and its `_internal` folder together after extracting the ZIP. `VERSION.txt` and
 `release-manifest.json` identify the exact version, commit and SHA-256 file hashes. Privacy-safe

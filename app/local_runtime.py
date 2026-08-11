@@ -9,6 +9,11 @@ import urllib.request
 from urllib.parse import urlparse
 
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+LOCAL_MODEL_MAX_CHARACTERS = 12_000
+
+
+def local_model_eligible(text: str, runtime_ready: bool) -> bool:
+    return runtime_ready and len(text) <= LOCAL_MODEL_MAX_CHARACTERS
 
 
 class InvalidLocalRuntimeUrl(ValueError):

@@ -1,6 +1,12 @@
 import json
 
-from app.local_runtime import local_mistral_ready
+from app.local_runtime import LOCAL_MODEL_MAX_CHARACTERS, local_mistral_ready, local_model_eligible
+
+
+def test_local_model_eligibility_is_explicit_at_size_boundary() -> None:
+    assert local_model_eligible("x" * LOCAL_MODEL_MAX_CHARACTERS, True)
+    assert not local_model_eligible("x" * (LOCAL_MODEL_MAX_CHARACTERS + 1), True)
+    assert not local_model_eligible("short", False)
 
 
 def test_readiness_refuses_spoofed_loopback_without_network(monkeypatch) -> None:
