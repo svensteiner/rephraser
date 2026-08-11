@@ -1,0 +1,78 @@
+name: Windows Portable
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "app/**"
+      - "packaging/**"
+      - "pyproject.toml"
+      - "SCHNELLSTART.md"
+      - ".github/workflows/windows-portable.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install build dependencies
+        run: python -m pip install . pyinstaller==6.16.0
+      - name: Run desktop self-test
+        run: python -m app.desktop --self-test
+      - name: Build portable application
+        run: pyinstaller --noconfirm --clean packaging/TextVerbessern.spec
+      - name: Test packaged application
+        shell: pwsh
+        run: |
+          $process = Start-Process .\dist\TextVerbessern.exe `
+            -ArgumentList '--self-test' -WindowStyle Hidden -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Packaged self-test failed" }
+      - name: Create download archive
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force portable | Out-Null
+          Copy-Item dist\TextVerbessern.exe portable\TextVerbessern.exe
+          Copy-Item SCHNELLSTART.md portable\SCHNELLSTART.md
+          @"
+          TEXT VERBESSERN – PORTABLE VERSION
+
+          1. TextVerbessern.exe doppelklicken.
+          2. Text einfügen.
+          3. Text überarbeiten anklicken.
+          4. Ergebnis kopieren.
+
+          Die Grundbereinigung funktioniert ohne Installation.
+          Für eine sprachliche Überarbeitung muss Ollama mit dem Modell mistral lokal laufen.
+          Es gibt keinen Cloud-Fallback.
+          "@ | Set-Content portable\STARTEN.txt -Encoding UTF8
+          Compress-Archive -Path portable\* -DestinationPath TextVerbessern-Windows.zip -Force
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TextVerbessern-Windows
+          path: TextVerbessern-Windows.zip
+          retention-days: 30
+      - name: Publish stable portable download
+        if: github.ref == 'refs/heads/main'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git tag -f portable-latest $env:GITHUB_SHA
+          git push origin refs/tags/portable-latest --force
+          gh release view portable-latest 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload portable-latest TextVerbessern-Windows.zip --clobber
+          } else {
+            gh release create portable-latest TextVerbessern-Windows.zip `
+              --prerelease `
+              --title "Text verbessern – aktueller Windows-Download" `
+              --notes "Portable, lokale Windows-Version. Keine Installation und kein Cloud-Fallback."
+          }

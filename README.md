@@ -1,5 +1,20 @@
 # Text verbessern – Editorial Transformer
 
+## Portabler Windows-Download
+
+Für einen zweiten oder gesperrten Windows-PC gibt es eine portable Version ohne
+Python-Installation:
+
+1. [`TextVerbessern-Windows.zip`](https://github.com/svensteiner/rephraser/releases/download/portable-latest/TextVerbessern-Windows.zip) herunterladen.
+2. ZIP-Datei entpacken.
+3. `TextVerbessern.exe` doppelklicken.
+4. Text einfügen, **Text überarbeiten** und **Ergebnis kopieren**.
+
+Die sichere Grundbereinigung funktioniert direkt. Die sprachliche Überarbeitung steht
+zusätzlich zur Verfügung, wenn auf dem jeweiligen PC Ollama mit `mistral` lokal läuft.
+Es gibt keinen Cloud-Fallback. Da die EXE derzeit nicht kommerziell codesigniert ist,
+kann Windows beim ersten Start eine Sicherheitsabfrage anzeigen.
+
 ## Einfachster Start unter Windows
 
 1. Doppelklicke im Projektordner auf **`TEXT VERBESSERN.cmd`**.

@@ -10,3 +10,6 @@ examples/*.edited.*
 outputs/
 user-data/
 logs/
+build/
+dist/
+*.spec.bak
