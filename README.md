@@ -1,0 +1,107 @@
+# Text verbessern – Editorial Transformer
+
+## Einfachster Start unter Windows
+
+1. Doppelklicke im Projektordner auf **`TEXT VERBESSERN.cmd`**.
+2. Füge einen Text aus Claude oder einer anderen Quelle ein.
+3. Klicke auf **Text überarbeiten**.
+4. Klicke auf **Ergebnis kopieren**.
+
+Beim ersten Start richtet das Startprogramm eine private Laufzeitumgebung unter
+`%LOCALAPPDATA%\LLP\EditorialTransformer` ein. Administratorrechte sind nicht nötig.
+Danach öffnet sich die Anwendung automatisch im Browser und ist ausschließlich unter
+`127.0.0.1` erreichbar. Eine bebilderungsfreie Kurzfassung steht in
+[`SCHNELLSTART.md`](SCHNELLSTART.md).
+
+A production-oriented, local-first Python application for turning draft text into an
+edited version while auditing preservation of facts, numbers, dates, names, quotations,
+citations, URLs, uncertainty, Markdown, and argument structure.
+
+This application optimizes editorial quality—not detector scores. It does not calculate
+an “AI probability,” claim that text is undetectable, or attempt to defeat AI provenance
+or statistical watermarking systems.
+
+## Privacy and provider model
+
+The default rule stage is deterministic and offline. It sends neither text nor derived
+features anywhere. The normal UI then uses `mistral-local` for substantive editing when
+the local model is available. It talks to an Ollama-compatible Mistral endpoint
+on `127.0.0.1`, `localhost`, or `::1`; non-loopback URLs are rejected. A Mistral failure
+never triggers a cloud fallback. OpenAI and Anthropic adapter classes are present as
+interchangeable extension points but deliberately disabled pending an explicit data
+transmission review.
+
+Rule-based mode is deliberately conservative: it normalizes NFC/line endings and cleans
+known copy/paste artifacts. It does not attempt unsafe sentence rewrites. Substantive
+editing requires the local Mistral provider. Unknown invisible characters are reported
+and retained.
+
+GitHub stores source code, tests, documentation, and releases only. Pasted text, edited
+results, audit reports, and local logs are never committed or uploaded automatically.
+
+## Install
+
+```powershell
+cd 'K:\LLP Wirtschaftsprüfung\AI Tools\paraphraser\editorial-transformer'
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -e ".[dev,ui]"
+```
+
+## Run
+
+CLI, fully offline:
+
+```powershell
+editorial-transformer examples\sample.md -o edited.md --provider rules
+Get-Content input.txt -Raw | editorial-transformer --stdin --provider rules
+```
+
+Local Mistral through Ollama:
+
+```powershell
+ollama pull mistral
+ollama serve
+$env:MISTRAL_MODEL='mistral'
+editorial-transformer input.md -o edited.md --provider mistral-local
+```
+
+REST API and interactive docs:
+
+```powershell
+uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+# Open http://127.0.0.1:8000/docs
+```
+
+Streamlit (manual developer start):
+
+```powershell
+streamlit run app/ui/streamlit_app.py
+```
+
+Tests:
+
+```powershell
+pytest
+```
+
+## REST example
+
+```powershell
+$body = @{
+  text = 'Es ist wichtig zu beachten, dass der Wert 4,25 % beträgt.'
+  options = @{ provider = 'rules'; tone = 'concise'; rewrite_strength = 'medium'; language = 'German' }
+} | ConvertTo-Json
+Invoke-RestMethod http://127.0.0.1:8000/transform -Method Post -ContentType application/json -Body $body
+```
+
+Each result includes the rewritten text and an audit with SHA-256 input hash, UTC time,
+pipeline version, inspection, semantic constraints, transformations, preservation
+warnings, word/sentence diff, and before/after descriptive quality metrics.
+
+## Fail-safe limits
+
+Deterministic validation can prove exact-string preservation, but it cannot prove full
+semantic equivalence. Any missing protected value, introduced number/date/citation, or
+weakly supported new claim becomes a warning for human review. Publication remains a
+human editorial decision.

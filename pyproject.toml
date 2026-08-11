@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "editorial-transformer"
+version = "1.0.0"
+description = "Auditable editorial rewriting with semantic preservation checks"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = ["fastapi>=0.115", "pydantic>=2.8", "uvicorn>=0.30"]
+
+[project.optional-dependencies]
+ui = ["streamlit>=1.37", "requests>=2.32"]
+dev = ["pytest>=8.3", "httpx>=0.27"]
+
+[project.scripts]
+editorial-transformer = "app.main:cli"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

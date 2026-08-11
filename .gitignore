@@ -1,0 +1,12 @@
+.env
+.venv/
+__pycache__/
+.pytest_cache/
+*.py[cod]
+*.egg-info/
+*.audit.json
+*.diff.txt
+examples/*.edited.*
+outputs/
+user-data/
+logs/
