@@ -151,26 +151,26 @@ class DesktopApp:
         self.progress = ttk.Progressbar(controls, mode="indeterminate", length=150)
         self.progress.pack(side="right", padx=12)
 
-        result_line = ttk.Frame(outer)
-        result_line.pack(fill="x")
-        ttk.Label(result_line, text="Fertiger Text", font=("Segoe UI", 11, "bold")).pack(side="left")
+        self.result_line = ttk.Frame(outer)
+        ttk.Label(self.result_line, text="Fertiger Text", font=("Segoe UI", 11, "bold")).pack(side="left")
         self.copy_button = ttk.Button(
-            result_line, text="Ergebnis kopieren", command=self.copy_result, style="Secondary.TButton", state="disabled"
+            self.result_line, text="Ergebnis kopieren", command=self.copy_result,
+            style="Secondary.TButton", state="disabled"
         )
         self.copy_button.pack(side="right")
         self.output_text = scrolledtext.ScrolledText(outer, height=10, wrap="word", font=("Segoe UI", 11), undo=True)
-        self.output_text.pack(fill="both", expand=True, pady=(6, 8))
+        self.result_visible = False
 
-        bottom = ttk.Frame(outer)
-        bottom.pack(fill="x")
+        self.bottom = ttk.Frame(outer)
+        self.bottom.pack(fill="x")
         self.result_status = ttk.Label(
-            bottom,
+            self.bottom,
             text=f"Text einfügen und auf „{primary_action_label(self.mistral_ready)}“ klicken.",
             style="Hint.TLabel",
         )
         self.result_status.pack(side="left")
-        ttk.Button(bottom, text="Leeren", command=self.clear_all, style="Secondary.TButton").pack(side="right")
-        ttk.Button(bottom, text="Speichern", command=self.save_result, style="Secondary.TButton").pack(
+        ttk.Button(self.bottom, text="Leeren", command=self.clear_all, style="Secondary.TButton").pack(side="right")
+        ttk.Button(self.bottom, text="Speichern", command=self.save_result, style="Secondary.TButton").pack(
             side="right", padx=(0, 8)
         )
 
@@ -290,6 +290,10 @@ class DesktopApp:
         rewritten = result.rewritten_text
         source = self.input_text.get("1.0", "end-1c")
         changed = rewritten != source
+        if not self.result_visible:
+            self.result_line.pack(fill="x", before=self.bottom)
+            self.output_text.pack(fill="both", expand=True, pady=(6, 8), before=self.bottom)
+            self.result_visible = True
         self.output_text.delete("1.0", "end")
         self.output_text.insert("1.0", rewritten)
         self.processed_source = source
@@ -319,12 +323,18 @@ class DesktopApp:
         self.run_button.configure(state="normal")
         self.input_text.configure(state="normal")
         self.mode_box.configure(state="readonly")
+        source = self.input_text.get("1.0", "end-1c")
+        previous = self.output_text.get("1.0", "end-1c")
+        previous_available = result_is_current(source, self.processed_source, previous, False)
+        self.copy_button.configure(state="normal" if previous_available else "disabled")
         if isinstance(error, ProviderError):
             write_diagnostic_event("provider_unavailable", error)
             message = "Das lokale Sprachmodell antwortet nicht. Der Text hat diesen PC nicht verlassen."
         else:
             write_diagnostic_event("processing_failed", error)
             message = "Die Bearbeitung konnte nicht abgeschlossen werden. Der eingegebene Text bleibt erhalten."
+        if previous_available:
+            message += " Das letzte gültige Ergebnis bleibt verfügbar."
         self.result_status.configure(text=message)
         self.messagebox.showerror("Bearbeitung nicht möglich", f"{message}\n\nTechnische Information: {error}")
 
@@ -368,6 +378,10 @@ class DesktopApp:
         self.copy_button.configure(state="disabled")
         self.copy_button.configure(text="Ergebnis kopieren")
         self.processed_source = None
+        if self.result_visible:
+            self.result_line.pack_forget()
+            self.output_text.pack_forget()
+            self.result_visible = False
         self.source_count.set("0 Wörter · 0 Zeichen")
         self.result_status.configure(
             text=f"Text einfügen und auf „{primary_action_label(self.mistral_ready)}“ klicken."

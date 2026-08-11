@@ -42,6 +42,13 @@ class MarkdownDamagingStub(EditorialProvider):
         return text.replace("# Titel", "Titel").replace("- Punkt", "Punkt")
 
 
+class NumericContextSwapStub(EditorialProvider):
+    name = "mistral-test"
+
+    def rewrite(self, text, constraints, options):
+        return "Revenue increased to EUR 5; operating profit declined to EUR 10."
+
+
 def test_rules_preserve_protected_content_and_umlauts() -> None:
     text = ('Es ist wichtig zu beachten, dass Jörg Müller am 31.12.2025 „Grüße“ sagte. '
             'Der Wert war 1.250,50 EUR (12,5 %). https://example.com/x')
@@ -187,3 +194,11 @@ def test_substantial_rules_preserve_blank_lines_inside_fenced_code() -> None:
     text = "Vorher\n\n\nNachher\n```text\na\n\n\n\nb\n```\n"
     result = run_pipeline(text, TransformOptions(provider="rules", rewrite_strength="substantial"))
     assert result.rewritten_text == "Vorher\n\nNachher\n```text\na\n\n\n\nb\n```\n"
+
+
+def test_numeric_context_swap_is_rejected_by_pipeline() -> None:
+    text = "Revenue increased to EUR 10; operating profit declined to EUR 5."
+    result = run_pipeline(text, TransformOptions(provider="rules"), provider=NumericContextSwapStub())
+    assert result.rewritten_text == text
+    rejection = next(w for w in result.audit.fact_preservation_warnings if w.kind == "rewrite_rejected")
+    assert "reassigned_numeric_context" in rejection.value

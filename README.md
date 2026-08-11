@@ -143,6 +143,10 @@ negation or uncertainty, altered Markdown structure, or weakly supported claim b
 warning. Unsafe editorial candidates are rejected in favor of conservative local cleanup.
 Publication remains a human editorial decision.
 
+When a document contains multiple protected numbers, the validator also checks for strong evidence
+that those values were reassigned between factual contexts—for example, a revenue figure swapped
+with an operating-profit figure even though both exact numbers still appear.
+
 Local Mistral calls have both socket limits and a hard wall-clock deadline. If the model is
 unavailable or responds too slowly, the application returns conservative local cleanup and never
 falls back to a cloud service.

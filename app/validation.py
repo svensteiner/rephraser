@@ -18,6 +18,12 @@ FENCED_BLOCK = re.compile(
 )
 INLINE_CODE = re.compile(r"(?<!`)`{1,2}[^\n]+?`{1,2}(?!`)")
 LINK_TARGET = re.compile(r"\]\(([^)\n]+)\)")
+CLAUSE_SPLIT = re.compile(r"(?:;|\b(?:while|whereas|and|but|während|hingegen|und|aber)\b)", re.I)
+ASSOCIATION_STOPWORDS = {
+    "also", "been", "being", "dem", "den", "der", "des", "die", "eine", "einer", "eines",
+    "for", "from", "hat", "haben", "ist", "mit", "the", "this", "to", "von", "war", "was",
+    "were", "will", "wird", "with", "zum", "zur",
+}
 
 
 def _markdown_signature(text: str) -> dict[str, list[str] | int]:
@@ -37,6 +43,42 @@ def _markdown_signature(text: str) -> dict[str, list[str] | int]:
 
 def _content_terms(sentence: str) -> set[str]:
     return {term.casefold() for term in CONTENT_WORD.findall(sentence)}
+
+
+def _numeric_clause_anchors(text: str, values: list[str]) -> dict[str, set[str]]:
+    anchors = {value: set() for value in values}
+    for clause in CLAUSE_SPLIT.split(text):
+        present = [value for value in values if value in clause]
+        if not present:
+            continue
+        without_numbers = re.sub(NUMBER, " ", clause, flags=re.I)
+        terms = _content_terms(without_numbers) - ASSOCIATION_STOPWORDS
+        for value in present:
+            anchors[value].update(terms)
+    return anchors
+
+
+def _reassigned_numeric_values(original: str, rewritten: str, values: list[str]) -> list[str]:
+    """Detect strong evidence that preserved numbers exchanged their factual contexts."""
+    unique_values = list(dict.fromkeys(values))
+    if len(unique_values) < 2:
+        return []
+    original_anchors = _numeric_clause_anchors(original, unique_values)
+    rewritten_anchors = _numeric_clause_anchors(rewritten, unique_values)
+    reassigned = []
+    for value in unique_values:
+        own_context = original_anchors[value]
+        new_context = rewritten_anchors[value]
+        if len(own_context) < 2 or len(new_context) < 2:
+            continue
+        own_score = len(own_context & new_context)
+        other_score = max(
+            (len(original_anchors[other] & new_context) for other in unique_values if other != value),
+            default=0,
+        )
+        if other_score >= 2 and other_score > own_score:
+            reassigned.append(value)
+    return reassigned
 
 
 def validate_preservation(original: str, rewritten: str, constraints: SemanticConstraints,
@@ -109,6 +151,15 @@ def validate_preservation(original: str, rewritten: str, constraints: SemanticCo
             kind="altered_uncertainty", severity="high", value="uncertainty",
             message="The number of explicit uncertainty markers changed in the rewrite.",
         ))
+
+    if preserve_numbers:
+        for value in _reassigned_numeric_values(original, rewritten, constraints.numbers):
+            warnings.append(ValidationWarning(
+                kind="reassigned_numeric_context",
+                severity="high",
+                value=value,
+                message="A preserved number appears to have moved to another factual context.",
+            ))
 
     rewritten_claim_terms = [_content_terms(sentence) for sentence in new_semantics.core_claims]
     for claim in constraints.core_claims:

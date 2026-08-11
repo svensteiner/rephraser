@@ -68,3 +68,18 @@ def test_accepts_compact_claim_with_same_subject_and_intent() -> None:
     rewritten = "Account structure details requested."
     warnings = validate_preservation(original, rewritten, extract_semantics(original))
     assert not any(w.kind == "missing_or_reassigned_claim" for w in warnings)
+
+
+def test_detects_numbers_swapped_between_factual_contexts() -> None:
+    original = "Revenue increased to EUR 10; operating profit declined to EUR 5."
+    rewritten = "Revenue increased to EUR 5; operating profit declined to EUR 10."
+    warnings = validate_preservation(original, rewritten, extract_semantics(original))
+    reassigned = {warning.value for warning in warnings if warning.kind == "reassigned_numeric_context"}
+    assert reassigned == {"EUR 10", "EUR 5"}
+
+
+def test_allows_rewording_around_numbers_when_associations_stay_intact() -> None:
+    original = "Revenue increased to EUR 10; operating profit declined to EUR 5."
+    rewritten = "Revenue rose to EUR 10; operating profit fell to EUR 5."
+    warnings = validate_preservation(original, rewritten, extract_semantics(original))
+    assert not any(w.kind == "reassigned_numeric_context" for w in warnings)
