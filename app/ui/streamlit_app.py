@@ -117,6 +117,7 @@ with st.expander("Bearbeitung anpassen"):
         mode_choices,
         horizontal=True,
     )
+    language_label = st.selectbox("Sprache", ["Automatisch erkennen", "Deutsch", "Englisch"])
     if mistral_ready and mode_label == "Gründlich mit Mistral (bis 45 s)":
         tone_label = st.selectbox(
             "Stil",
@@ -127,11 +128,22 @@ with st.expander("Bearbeitung anpassen"):
         tone_label = "Stil beibehalten"
         custom_style = ""
         st.caption("Stiloptionen gelten nur für die optionale gründliche Mistral-Bearbeitung.")
+    st.markdown("**Unverändert schützen**")
+    protection_columns = st.columns(3)
+    preserve_numbers = protection_columns[0].checkbox("Zahlen und Daten", value=True)
+    preserve_citations = protection_columns[1].checkbox("Quellen und Links", value=True)
+    preserve_quotations = protection_columns[2].checkbox("Wörtliche Zitate", value=True)
+    st.caption("Eigennamen und Tatsachenbehauptungen werden unabhängig davon immer geprüft.")
 
 tone_map = {
     "Stil beibehalten": "professional", "Professionell": "professional",
     "Analytisch": "analytical", "Kompakt": "concise", "Akademisch": "academic",
     "LinkedIn / Artikel": "LinkedIn/article",
+}
+language_map = {
+    "Automatisch erkennen": "auto-detect",
+    "Deutsch": "German",
+    "Englisch": "English",
 }
 
 action_label = "Text verbessern"
@@ -149,10 +161,10 @@ if run:
         provider=provider,
         rewrite_strength=strength,
         tone=tone_map[tone_label],
-        language="auto-detect",
-        preserve_citations=True,
-        preserve_numbers=True,
-        preserve_quotations=True,
+        language=language_map[language_label],
+        preserve_citations=preserve_citations,
+        preserve_numbers=preserve_numbers,
+        preserve_quotations=preserve_quotations,
         custom_author_style=custom_style,
     )
     message = (
@@ -164,6 +176,7 @@ if run:
         try:
             st.session_state.result = run_pipeline(st.session_state.source_text, options)
             st.session_state.result_source = st.session_state.source_text
+            st.session_state.original_preview = st.session_state.source_text
             st.session_state.editable_result = st.session_state.result.rewritten_text
             was_rejected = any(
                 warning.kind == "rewrite_rejected"
@@ -197,8 +210,11 @@ if result is not None:
         st.warning("Der Ausgangstext wurde geändert. Bitte erneut überarbeiten.")
     st.markdown('<div class="result-label">Fertiger Text</div>', unsafe_allow_html=True)
     st.caption(st.session_state.processing_note)
-    st.text_area("Bearbeitetes Ergebnis", height=350, key="editable_result",
-                 label_visibility="collapsed")
+    comparison = st.columns(2)
+    with comparison[0]:
+        st.text_area("Original", height=350, key="original_preview", disabled=True)
+    with comparison[1]:
+        st.text_area("Bearbeitetes Ergebnis", height=350, key="editable_result")
     copy_button(st.session_state.editable_result)
 
     warning_count = len(result.audit.fact_preservation_warnings)
@@ -228,6 +244,24 @@ if result is not None:
                 st.warning(f"{warning.message} Wert: {warning.value}")
         st.subheader("Änderungen")
         st.code("\n".join(result.audit.diff.sentence_diff) or "Keine Änderungen", language="diff", wrap_lines=True)
+        st.subheader("Qualität vor und nach der Bearbeitung")
+        before = result.audit.quality_metrics_before
+        after = result.audit.quality_metrics_after
+        st.table([
+            {"Kennzahl": "Sätze", "Vorher": before.sentence_count, "Nachher": after.sentence_count},
+            {"Kennzahl": "Ø Satzlänge", "Vorher": before.sentence_length_mean,
+             "Nachher": after.sentence_length_mean},
+            {"Kennzahl": "Lexikalische Vielfalt", "Vorher": before.lexical_diversity,
+             "Nachher": after.lexical_diversity},
+            {"Kennzahl": "Wiederholte Wörter", "Vorher": before.repeated_word_count,
+             "Nachher": after.repeated_word_count},
+            {"Kennzahl": "Füllphrasen", "Vorher": before.filler_phrase_count,
+             "Nachher": after.filler_phrase_count},
+            {"Kennzahl": "Passiv-Indikatoren", "Vorher": before.passive_voice_indicators,
+             "Nachher": after.passive_voice_indicators},
+            {"Kennzahl": "Lesbarkeitsindikator", "Vorher": before.readability,
+             "Nachher": after.readability},
+        ])
         unusual = result.audit.inspection.characters
         if unusual:
             st.subheader("Ungewöhnliche Zeichen")
@@ -242,6 +276,7 @@ if result is not None:
         st.session_state.source_text = ""
         st.session_state.result = None
         st.session_state.result_source = ""
+        st.session_state.pop("original_preview", None)
         st.session_state.pop("editable_result", None)
         st.rerun()
 

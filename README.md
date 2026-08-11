@@ -15,6 +15,12 @@ Für den direkten Kopierablauf gibt es in der Windows-App die Schaltfläche
 PC wirklich verfügbar sind. **Schnell verbessern** arbeitet regelbasiert, vollständig
 lokal und typischerweise in deutlich unter einer Sekunde. Wirkungslose Optionen werden
 nicht angeboten.
+
+Die Browser-Oberfläche zeigt nach der Bearbeitung **Original und Ergebnis nebeneinander**.
+Unter **Bearbeitung anpassen** lassen sich Sprache sowie der exakte Schutz von Zahlen
+und Daten, Quellen und Links sowie wörtlichen Zitaten einstellen. Eigennamen und
+Tatsachenbehauptungen werden immer geprüft. Der Bereich **Änderungen und Prüfung**
+enthält Diff, Unicode-Befunde und die Qualitätskennzahlen vor und nach der Bearbeitung.
 Die lokale Modellbearbeitung ist auf 45 Sekunden begrenzt. Antwortet Mistral nicht
 rechtzeitig, zeigt die App automatisch die sofort verfügbare sichere Bereinigung an.
 
@@ -124,6 +130,9 @@ Each result includes the rewritten text and an audit with SHA-256 input hash, UT
 pipeline version, before/after Unicode inspection, grouped code-point counts and positions,
 semantic constraints, transformations with explicit original/result offsets, preservation
 warnings, word/sentence diff, and before/after descriptive quality metrics.
+
+File export writes the result, JSON audit and sentence diff as three separate files.
+Each target is replaced atomically so an interrupted write does not leave a partial file.
 
 ## Fail-safe limits
 

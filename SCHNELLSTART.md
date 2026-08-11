@@ -7,6 +7,10 @@
    **Text verbessern**. Der empfohlene Modus liefert das Ergebnis praktisch sofort.
 5. Klicke beim fertigen Text auf **Ergebnis kopieren**.
 
+Im Browser stehen Original und Ergebnis nach der Bearbeitung nebeneinander. Zusätzliche
+Schutz- und Prüfoptionen befinden sich unter **Bearbeitung anpassen** beziehungsweise
+**Änderungen und Prüfung**.
+
 Die Verarbeitung läuft auf diesem PC. Es gibt keinen automatischen Wechsel zu einem
 Cloud-Dienst. Das Kommando-Fenster muss während der Nutzung geöffnet bleiben.
 

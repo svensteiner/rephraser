@@ -58,3 +58,33 @@ def test_mistral_requests_reproducible_local_generation(monkeypatch) -> None:
     assert result == text
     assert captured["options"] == {"temperature": 0, "seed": 42, "num_predict": 96}
     assert captured["stream"] is False
+
+
+def test_mistral_exact_value_options_control_the_mandatory_prompt(monkeypatch) -> None:
+    captured = {}
+    text = 'Anna Müller meldete am 3. März 2026 12,5 %. „Bestätigt.“ https://example.org/x'
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def read(self, limit):
+            return json.dumps({"response": text}).encode("utf-8")
+
+    class Opener:
+        def open(self, request, timeout):
+            captured.update(json.loads(request.data))
+            return Response()
+
+    monkeypatch.setattr("urllib.request.build_opener", lambda *handlers: Opener())
+    options = TransformOptions(
+        preserve_numbers=False,
+        preserve_citations=False,
+        preserve_quotations=False,
+    )
+    LocalMistralProvider().rewrite(text, extract_semantics(text), options)
+    mandatory_json = captured["prompt"].split("Mandatory exact strings: ", 1)[1].splitlines()[0]
+    assert json.loads(mandatory_json) == ["Anna Müller"]
