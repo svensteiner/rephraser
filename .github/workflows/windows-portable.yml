@@ -71,17 +71,20 @@ jobs:
           retention-days: 30
       - name: Publish stable portable download
         if: github.ref == 'refs/heads/main'
+        timeout-minutes: 5
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          git tag -f portable-latest $env:GITHUB_SHA
-          git push origin refs/tags/portable-latest --force
           gh release view portable-latest 2>$null
           if ($LASTEXITCODE -eq 0) {
+            gh api --method PATCH `
+              "repos/$env:GITHUB_REPOSITORY/git/refs/tags/portable-latest" `
+              -f sha="$env:GITHUB_SHA" -F force=true | Out-Null
             gh release upload portable-latest TextVerbessern-Windows.zip --clobber
           } else {
             gh release create portable-latest TextVerbessern-Windows.zip `
+              --target "$env:GITHUB_SHA" `
               --prerelease `
               --title "Text verbessern – aktueller Windows-Download" `
               --notes "Portable, lokale Windows-Version. Keine Installation und kein Cloud-Fallback."
