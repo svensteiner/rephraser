@@ -6,6 +6,39 @@ from .models import SemanticConstraints, ValidationWarning
 from .semantic import DATE, NUMBER, URL, extract_semantics
 
 
+NEGATION = re.compile(r"\b(?:not|no|never|neither|without|nicht|kein(?:e|en|em|er|es)?|nie|ohne)\b", re.I)
+UNCERTAINTY = re.compile(
+    r"\b(?:may|might|could|possibly|probably|perhaps|likely|appears?|suggests?|"
+    r"könnte|möglicherweise|vermutlich|wohl|dürfte|eventuell|unter Umständen)\b",
+    re.I,
+)
+CONTENT_WORD = re.compile(r"\b[^\W\d_][\wÄÖÜäöüß-]{3,}\b", re.UNICODE)
+FENCED_BLOCK = re.compile(
+    r"^(?P<fence>`{3,}|~{3,})[^\n]*\n[\s\S]*?^(?P=fence)[ \t]*(?=\n|$)", re.MULTILINE
+)
+INLINE_CODE = re.compile(r"(?<!`)`{1,2}[^\n]+?`{1,2}(?!`)")
+LINK_TARGET = re.compile(r"\]\(([^)\n]+)\)")
+
+
+def _markdown_signature(text: str) -> dict[str, list[str] | int]:
+    lines = text.splitlines()
+    return {
+        "fenced_code": [match.group(0) for match in FENCED_BLOCK.finditer(text)],
+        "inline_code": INLINE_CODE.findall(text),
+        "headings": [match.group(1) for line in lines if (match := re.match(r"^(#{1,6})\s+", line))],
+        "lists": [match.group(1) for line in lines
+                  if (match := re.match(r"^(\s*(?:[-*+] |\d+[.)] |[-*+] \[[ xX]\] ))", line))],
+        "blockquotes": sum(bool(re.match(r"^\s*>", line)) for line in lines),
+        "table_pipes": [line.count("|") for line in lines if "|" in line],
+        "hard_breaks": len(re.findall(r" {2}\n", text)),
+        "link_targets": LINK_TARGET.findall(text),
+    }
+
+
+def _content_terms(sentence: str) -> set[str]:
+    return {term.casefold() for term in CONTENT_WORD.findall(sentence)}
+
+
 def validate_preservation(original: str, rewritten: str, constraints: SemanticConstraints,
                           *, preserve_numbers: bool = True, preserve_citations: bool = True,
                           preserve_quotations: bool = True) -> list[ValidationWarning]:
@@ -54,4 +87,40 @@ def validate_preservation(original: str, rewritten: str, constraints: SemanticCo
         if len(terms) >= 4 and len(terms & original_terms) / len(terms) <= .35:
             warnings.append(ValidationWarning(kind="unsupported_new_claim", severity="medium", value=sentence,
                 message="Sentence has low lexical support in the original; review its factual basis."))
+
+    original_markdown = _markdown_signature(original)
+    rewritten_markdown = _markdown_signature(rewritten)
+    for feature, original_value in original_markdown.items():
+        if original_value != rewritten_markdown[feature]:
+            warnings.append(ValidationWarning(
+                kind="altered_markdown_structure",
+                severity="high",
+                value=feature,
+                message=f"Markdown {feature.replace('_', ' ')} changed in the rewrite.",
+            ))
+
+    if len(NEGATION.findall(original)) != len(NEGATION.findall(rewritten)):
+        warnings.append(ValidationWarning(
+            kind="altered_negation", severity="high", value="negation",
+            message="The number of explicit negations changed in the rewrite.",
+        ))
+    if len(UNCERTAINTY.findall(original)) != len(UNCERTAINTY.findall(rewritten)):
+        warnings.append(ValidationWarning(
+            kind="altered_uncertainty", severity="high", value="uncertainty",
+            message="The number of explicit uncertainty markers changed in the rewrite.",
+        ))
+
+    rewritten_claim_terms = [_content_terms(sentence) for sentence in new_semantics.core_claims]
+    for claim in constraints.core_claims:
+        terms = _content_terms(claim)
+        if len(terms) < 4:
+            continue
+        best_recall = max((len(terms & candidate) / len(terms) for candidate in rewritten_claim_terms), default=0.0)
+        if best_recall < 0.35:
+            warnings.append(ValidationWarning(
+                kind="missing_or_reassigned_claim",
+                severity="high",
+                value=claim,
+                message="An original claim has insufficient lexical support in the rewrite.",
+            ))
     return warnings

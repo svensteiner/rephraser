@@ -42,3 +42,22 @@ def test_new_name_and_quotation_are_reported_symmetrically() -> None:
     kinds = {warning.kind for warning in warnings}
     assert "new_proper_name" in kinds
     assert "new_quotation" in kinds
+
+
+def test_detects_negation_uncertainty_and_claim_loss() -> None:
+    original = ("Der Umsatz dürfte steigen. Der Gewinn wird nicht sinken. "
+                "Die langfristigen Lieferverträge sichern stabile Beschaffungskosten.")
+    rewritten = "Der Umsatz wird steigen. Der Gewinn wird sinken."
+    warnings = validate_preservation(original, rewritten, extract_semantics(original))
+    kinds = {warning.kind for warning in warnings}
+    assert "altered_negation" in kinds
+    assert "altered_uncertainty" in kinds
+    assert "missing_or_reassigned_claim" in kinds
+
+
+def test_detects_markdown_structure_and_code_changes() -> None:
+    original = "# Titel\n\n- Punkt  \n\n```python\nx = 1\n```\n\n`code` [Quelle](https://example.org)"
+    rewritten = "Titel\n\nPunkt\n\npython\nx = 2\n\ncode [Quelle](https://example.org)"
+    warnings = validate_preservation(original, rewritten, extract_semantics(original))
+    changed = [warning.value for warning in warnings if warning.kind == "altered_markdown_structure"]
+    assert {"fenced_code", "inline_code", "headings", "lists", "hard_breaks"} <= set(changed)

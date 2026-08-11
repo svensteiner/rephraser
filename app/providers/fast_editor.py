@@ -10,7 +10,9 @@ from app.providers.local import LocalRuleProvider
 
 
 PROTECTED_PROSE = re.compile(
-    r"(\A---\r?\n[\s\S]*?\r?\n---(?=\r?\n|$)|```[\s\S]*?```|^>.*$|`[^`\n]+`|"
+    r"(\A---\r?\n[\s\S]*?\r?\n---(?=\r?\n|$)|(?:```|~~~)[\s\S]*?(?:```|~~~)|"
+    r"^(?: {4}|\t).*$|^>.*$|``[^\n]*?``|`[^`\n]+`|<https?://[^>\n]+>|"
+    r"\]\([^\)\n]+\)|"
     r"\"[^\"\n]+\"|„[^“\n]+“|“[^”\n]+”|»[^«\n]+«|«[^»\n]+»|‘[^’\n]+’)",
     re.MULTILINE,
 )

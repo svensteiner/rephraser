@@ -40,6 +40,11 @@ def primary_action_label(mistral_ready: bool) -> str:
     return "Text verbessern"
 
 
+def result_is_current(source: str, processed_source: str | None, result: str, busy: bool) -> bool:
+    """Return whether copy/save actions may use the displayed result."""
+    return not busy and bool(result) and processed_source is not None and source == processed_source
+
+
 def run_self_test() -> dict[str, object]:
     """Run a dependency-free functional check suitable for packaged builds."""
     source = "Grüße\u00a0aus Wien – 12,5 % am 3. März 2026."
@@ -75,6 +80,7 @@ class DesktopApp:
         self.root.configure(background="#f4f7f5")
         self.mistral_ready = local_mistral_ready()
         self.processed_source: str | None = None
+        self.busy = False
         self.processing_active = False
         self.processing_started = 0.0
 
@@ -217,6 +223,8 @@ class DesktopApp:
         self._set_source_text(content)
 
     def start_processing(self) -> None:
+        if self.busy:
+            return
         source = self.input_text.get("1.0", "end-1c")
         if not source.strip():
             self.messagebox.showinfo("Text fehlt", "Bitte zuerst einen Text einfügen.")
@@ -229,6 +237,7 @@ class DesktopApp:
             )
             return
         self.run_button.configure(state="disabled")
+        self.busy = True
         self.copy_button.configure(state="disabled")
         self.input_text.configure(state="disabled")
         self.mode_box.configure(state="disabled")
@@ -269,6 +278,7 @@ class DesktopApp:
         self.root.after(0, self._show_result, result, provider)
 
     def _show_result(self, result: object, provider: str) -> None:
+        self.busy = False
         self.processing_active = False
         self.progress.stop()
         self.run_button.configure(state="normal")
@@ -281,6 +291,7 @@ class DesktopApp:
         self.output_text.insert("1.0", rewritten)
         self.processed_source = source
         self.copy_button.configure(state="normal")
+        self.copy_button.focus_set()
         warning_kinds = {warning.kind for warning in result.audit.fact_preservation_warnings}
         if "provider_unavailable" in warning_kinds:
             message = "Mistral war nicht rechtzeitig verfügbar; sicher bereinigtes Ergebnis angezeigt."
@@ -299,6 +310,7 @@ class DesktopApp:
         self.result_status.configure(text=message)
 
     def _show_error(self, error: Exception) -> None:
+        self.busy = False
         self.processing_active = False
         self.progress.stop()
         self.run_button.configure(state="normal")
@@ -312,8 +324,9 @@ class DesktopApp:
         self.messagebox.showerror("Bearbeitung nicht möglich", f"{message}\n\nTechnische Information: {error}")
 
     def copy_result(self) -> None:
+        source = self.input_text.get("1.0", "end-1c")
         result = self.output_text.get("1.0", "end-1c")
-        if not result:
+        if not result_is_current(source, self.processed_source, result, self.busy):
             return
         self.root.clipboard_clear()
         self.root.clipboard_append(result)
@@ -323,9 +336,13 @@ class DesktopApp:
         self.root.after(1600, lambda: self.copy_button.configure(text="Ergebnis kopieren"))
 
     def save_result(self) -> None:
+        source = self.input_text.get("1.0", "end-1c")
         result = self.output_text.get("1.0", "end-1c")
-        if not result:
-            self.messagebox.showinfo("Kein Ergebnis", "Es gibt noch keinen fertigen Text zum Speichern.")
+        if not result_is_current(source, self.processed_source, result, self.busy):
+            self.messagebox.showinfo(
+                "Kein aktuelles Ergebnis",
+                "Bitte den aktuellen Ausgangstext zuerst bearbeiten; ein älteres Ergebnis wird nicht gespeichert.",
+            )
             return
         path = self.filedialog.asksaveasfilename(
             defaultextension=".txt", filetypes=(("Textdatei", "*.txt"), ("Markdown", "*.md"))

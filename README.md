@@ -126,10 +126,11 @@ $body = @{
 Invoke-RestMethod http://127.0.0.1:8000/transform -Method Post -ContentType application/json -Body $body
 ```
 
-Each result includes the rewritten text and an audit with SHA-256 input hash, UTC time,
-pipeline version, before/after Unicode inspection, grouped code-point counts and positions,
-semantic constraints, transformations with explicit original/result offsets, preservation
-warnings, word/sentence diff, and before/after descriptive quality metrics.
+Each result includes the rewritten text and an audit with SHA-256 input/output hashes, UTC time,
+pipeline version, requested/applied local provider and effective options, before/after Unicode
+inspection, grouped code-point counts and positions, semantic constraints, transformations with
+explicit offsets and code points, preservation warnings, word/sentence diff, and before/after
+descriptive quality metrics.
 
 File export writes the result, JSON audit and sentence diff as three separate files.
 Each target is replaced atomically so an interrupted write does not leave a partial file.
@@ -137,6 +138,7 @@ Each target is replaced atomically so an interrupted write does not leave a part
 ## Fail-safe limits
 
 Deterministic validation can prove exact-string preservation, but it cannot prove full
-semantic equivalence. Any missing protected value, introduced number/date/citation, or
-weakly supported new claim becomes a warning for human review. Publication remains a
-human editorial decision.
+semantic equivalence. Any missing protected value, introduced number/date/citation, changed
+negation or uncertainty, altered Markdown structure, or weakly supported claim becomes a
+warning. Unsafe editorial candidates are rejected in favor of conservative local cleanup.
+Publication remains a human editorial decision.

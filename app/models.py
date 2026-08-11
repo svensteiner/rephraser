@@ -117,6 +117,8 @@ class Transformation(BaseModel):
     before: str
     after: str
     reason: str
+    code_points_before: list[str] = Field(default_factory=list)
+    code_points_after: list[str] = Field(default_factory=list)
     original_start: int
     original_end: int
     rewritten_start: int
@@ -131,8 +133,12 @@ class TransformRequest(BaseModel):
 class AuditReport(BaseModel):
     model_config = ConfigDict(use_enum_values=True)
     original_hash: str
+    output_hash: str
     timestamp: datetime
     pipeline_version: str
+    requested_provider: str
+    applied_provider: str
+    options: dict[str, Any]
     inspection: InspectionReport
     inspection_after: InspectionReport
     semantic_constraints: SemanticConstraints

@@ -46,3 +46,18 @@ def test_fast_editor_preserves_front_matter_and_quoted_email_history() -> None:
     assert "title: We would like to better understand this" in result.rewritten_text
     assert "> We would like to better understand the old request." in result.rewritten_text
     assert result.rewritten_text.endswith("We would appreciate clarification on the current request.")
+
+
+def test_fast_editor_preserves_more_markdown_code_and_link_destinations() -> None:
+    text = (
+        "~~~text\nWe would like to better understand fenced code.\n~~~\n"
+        "    In order to preserve indented code\n"
+        "[Label](https://example.com/In_order_to) and <https://example.com/In_order_to>\n"
+        "In order to improve prose."
+    )
+    result = run_pipeline(text, TransformOptions(provider="fast-editor"))
+    assert "We would like to better understand fenced code." in result.rewritten_text
+    assert "    In order to preserve indented code" in result.rewritten_text
+    assert "](https://example.com/In_order_to)" in result.rewritten_text
+    assert "<https://example.com/In_order_to>" in result.rewritten_text
+    assert result.rewritten_text.endswith("To improve prose.")

@@ -6,6 +6,7 @@ from app.desktop import (
     local_mistral_ready,
     primary_action_label,
     processing_settings,
+    result_is_current,
     run_self_test,
 )
 
@@ -44,3 +45,11 @@ def test_readiness_check_refuses_non_loopback_hostname(monkeypatch) -> None:
 def test_readiness_check_refuses_userinfo(monkeypatch) -> None:
     monkeypatch.setenv("MISTRAL_BASE_URL", "http://user@localhost:11434")
     assert local_mistral_ready() is False
+
+
+def test_result_actions_require_current_non_busy_output() -> None:
+    assert result_is_current("source", "source", "result", False) is True
+    assert result_is_current("changed", "source", "result", False) is False
+    assert result_is_current("source", "source", "result", True) is False
+    assert result_is_current("source", None, "result", False) is False
+    assert result_is_current("source", "source", "", False) is False
