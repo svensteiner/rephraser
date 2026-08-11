@@ -32,8 +32,18 @@ jobs:
       - name: Test packaged application
         shell: pwsh
         run: |
-          $process = Start-Process .\dist\TextVerbessern.exe `
-            -ArgumentList '--self-test' -WindowStyle Hidden -Wait -PassThru
+          $info = [System.Diagnostics.ProcessStartInfo]::new()
+          $info.FileName = (Resolve-Path '.\dist\TextVerbessern.exe').Path
+          $info.Arguments = '--self-test'
+          $info.UseShellExecute = $false
+          $info.CreateNoWindow = $true
+          $process = [System.Diagnostics.Process]::new()
+          $process.StartInfo = $info
+          if (-not $process.Start()) { throw "Packaged application did not start" }
+          if (-not $process.WaitForExit(60000)) {
+            $process.Kill()
+            throw "Packaged self-test timed out"
+          }
           if ($process.ExitCode -ne 0) { throw "Packaged self-test failed" }
       - name: Create download archive
         shell: pwsh

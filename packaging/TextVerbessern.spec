@@ -1,12 +1,15 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+import os
+
 from PyInstaller.utils.hooks import collect_submodules
 
+project_root = os.path.abspath(os.path.join(SPECPATH, ".."))
 hidden = collect_submodules("pydantic") + collect_submodules("pydantic_core")
 
 analysis = Analysis(
-    ["app/desktop.py"],
-    pathex=["."],
+    [os.path.join(project_root, "app", "desktop.py")],
+    pathex=[project_root],
     binaries=[],
     datas=[],
     hiddenimports=hidden,
