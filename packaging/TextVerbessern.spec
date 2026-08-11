@@ -24,18 +24,28 @@ pyz = PYZ(analysis.pure)
 executable = EXE(
     pyz,
     analysis.scripts,
-    analysis.binaries,
-    analysis.datas,
     [],
+    exclude_binaries=True,
     name="TextVerbessern",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
     console=False,
+    version=os.path.join(SPECPATH, "windows_version_info.txt"),
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+)
+
+bundle = COLLECT(
+    executable,
+    analysis.binaries,
+    analysis.datas,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    name="TextVerbessern",
 )

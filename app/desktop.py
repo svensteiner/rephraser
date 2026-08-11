@@ -9,9 +9,11 @@ import threading
 import time
 
 from app.local_runtime import local_mistral_ready
+from app.diagnostics import write_diagnostic_event
 from app.models import TransformOptions
 from app.pipeline import run_pipeline
 from app.providers.base import ProviderError
+from app.ui_state import classify_result_state, result_actions_allowed
 
 
 MODE_AUTOMATIC = "Schnell verbessern (empfohlen)"
@@ -42,7 +44,8 @@ def primary_action_label(mistral_ready: bool) -> str:
 
 def result_is_current(source: str, processed_source: str | None, result: str, busy: bool) -> bool:
     """Return whether copy/save actions may use the displayed result."""
-    return not busy and bool(result) and processed_source is not None and source == processed_source
+    state = classify_result_state(source, processed_source, result, result, busy=busy)
+    return result_actions_allowed(state)
 
 
 def run_self_test() -> dict[str, object]:
@@ -317,8 +320,10 @@ class DesktopApp:
         self.input_text.configure(state="normal")
         self.mode_box.configure(state="readonly")
         if isinstance(error, ProviderError):
+            write_diagnostic_event("provider_unavailable", error)
             message = "Das lokale Sprachmodell antwortet nicht. Der Text hat diesen PC nicht verlassen."
         else:
+            write_diagnostic_event("processing_failed", error)
             message = "Die Bearbeitung konnte nicht abgeschlossen werden. Der eingegebene Text bleibt erhalten."
         self.result_status.configure(text=message)
         self.messagebox.showerror("Bearbeitung nicht möglich", f"{message}\n\nTechnische Information: {error}")
@@ -352,6 +357,7 @@ class DesktopApp:
         try:
             Path(path).write_text(result, encoding="utf-8", newline="\n")
         except OSError as error:
+            write_diagnostic_event("save_failed", error)
             self.messagebox.showerror("Speichern fehlgeschlagen", str(error))
             return
         self.result_status.configure(text="Gespeichert ✓")
@@ -378,7 +384,11 @@ def main(argv: list[str] | None = None) -> int:
         report = run_self_test()
         print(json.dumps(report, ensure_ascii=False))
         return 0 if report["ok"] else 1
-    DesktopApp().run()
+    try:
+        DesktopApp().run()
+    except Exception as error:
+        write_diagnostic_event("desktop_fatal", error)
+        return 1
     return 0
 
 

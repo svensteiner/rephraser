@@ -9,6 +9,7 @@ from app.local_runtime import local_mistral_ready
 from app.models import TransformOptions
 from app.pipeline import run_pipeline
 from app.providers.base import ProviderError
+from app.ui_state import ResultState, classify_result_state, result_actions_allowed
 
 MAX_CHARACTERS = 2_000_000
 
@@ -206,7 +207,14 @@ if run:
 
 result = st.session_state.result
 if result is not None:
-    if st.session_state.result_source != st.session_state.source_text:
+    displayed_result = st.session_state.get("editable_result", result.rewritten_text)
+    result_state = classify_result_state(
+        st.session_state.source_text,
+        st.session_state.result_source,
+        result.rewritten_text,
+        displayed_result,
+    )
+    if result_state == ResultState.STALE:
         st.warning("Der Ausgangstext wurde geändert. Bitte erneut überarbeiten.")
     st.markdown('<div class="result-label">Fertiger Text</div>', unsafe_allow_html=True)
     st.caption(st.session_state.processing_note)
@@ -215,11 +223,22 @@ if result is not None:
         st.text_area("Original", height=350, key="original_preview", disabled=True)
     with comparison[1]:
         st.text_area("Bearbeitetes Ergebnis", height=350, key="editable_result")
-    copy_button(st.session_state.editable_result)
+    result_state = classify_result_state(
+        st.session_state.source_text,
+        st.session_state.result_source,
+        result.rewritten_text,
+        st.session_state.editable_result,
+    )
+    if result_actions_allowed(result_state):
+        copy_button(st.session_state.editable_result)
 
     warning_count = len(result.audit.fact_preservation_warnings)
     warning_kinds = {warning.kind for warning in result.audit.fact_preservation_warnings}
-    if "provider_unavailable" in warning_kinds:
+    if result_state == ResultState.MANUALLY_EDITED:
+        st.info("Ergebnis manuell geändert – die automatische Prüfung gilt für diese Fassung nicht mehr.")
+    elif result_state == ResultState.STALE:
+        st.info("Das angezeigte Ergebnis gehört zum vorherigen Ausgangstext und kann nicht gespeichert werden.")
+    elif "provider_unavailable" in warning_kinds:
         st.warning("Mistral war nicht rechtzeitig verfügbar. Das sicher bereinigte Ergebnis wird angezeigt.")
     elif "rewrite_rejected" in warning_kinds:
         st.warning("Die sprachliche Fassung wurde vorsichtshalber verworfen. Der sicher bereinigte Text wird angezeigt.")
@@ -230,28 +249,35 @@ if result is not None:
     else:
         st.success("Keine auffälligen Änderungen an Zahlen, Daten, Namen, Zitaten oder Links gefunden.")
 
-    download_text = st.session_state.editable_result
-    downloads = st.columns(2)
-    downloads[0].download_button("Als TXT speichern", download_text, "bearbeiteter-text.txt", "text/plain",
-                                 use_container_width=True)
-    downloads[1].download_button("Als Markdown speichern", download_text, "bearbeiteter-text.md", "text/markdown",
-                                 use_container_width=True)
+    if result_actions_allowed(result_state):
+        download_text = st.session_state.editable_result
+        downloads = st.columns(2)
+        downloads[0].download_button("Als TXT speichern", download_text, "bearbeiteter-text.txt", "text/plain",
+                                     use_container_width=True)
+        downloads[1].download_button("Als Markdown speichern", download_text, "bearbeiteter-text.md", "text/markdown",
+                                     use_container_width=True)
 
     with st.expander("Änderungen und Prüfung"):
-        if result.audit.fact_preservation_warnings:
+        if result_state != ResultState.CURRENT:
+            st.info(
+                "Prüfdetails sind nur für das unveränderte, automatisch erzeugte Ergebnis verfügbar. "
+                "Bitte erneut überarbeiten, um einen aktuellen Prüfbericht zu erstellen."
+            )
+        elif result.audit.fact_preservation_warnings:
             st.subheader("Prüfhinweise")
             for warning in result.audit.fact_preservation_warnings:
                 st.warning(f"{warning.message} Wert: {warning.value}")
-        st.subheader("Änderungen")
-        st.caption(
-            f"Wortlaut verändert: {result.audit.diff.surface_diversity:.0%} "
-            "(Oberflächenvergleich; keine Aussage über semantische Gleichheit)."
-        )
-        st.code("\n".join(result.audit.diff.sentence_diff) or "Keine Änderungen", language="diff", wrap_lines=True)
-        st.subheader("Qualität vor und nach der Bearbeitung")
-        before = result.audit.quality_metrics_before
-        after = result.audit.quality_metrics_after
-        st.table([
+        if result_state == ResultState.CURRENT:
+            st.subheader("Änderungen")
+            st.caption(
+                f"Wortlaut verändert: {result.audit.diff.surface_diversity:.0%} "
+                "(Oberflächenvergleich; keine Aussage über semantische Gleichheit)."
+            )
+            st.code("\n".join(result.audit.diff.sentence_diff) or "Keine Änderungen", language="diff", wrap_lines=True)
+            st.subheader("Qualität vor und nach der Bearbeitung")
+            before = result.audit.quality_metrics_before
+            after = result.audit.quality_metrics_after
+            st.table([
             {"Kennzahl": "Sätze", "Vorher": before.sentence_count, "Nachher": after.sentence_count},
             {"Kennzahl": "Ø Satzlänge", "Vorher": before.sentence_length_mean,
              "Nachher": after.sentence_length_mean},
@@ -265,16 +291,16 @@ if result is not None:
              "Nachher": after.passive_voice_indicators},
             {"Kennzahl": "Lesbarkeitsindikator", "Vorher": before.readability,
              "Nachher": after.readability},
-        ])
-        unusual = result.audit.inspection.characters
-        if unusual:
-            st.subheader("Ungewöhnliche Zeichen")
-            st.write(
-                f"{len(unusual)} Vorkommen in {len(result.audit.inspection.character_summary)} "
-                "Zeichentyp(en) erkannt. Unbekannte Muster wurden beibehalten."
-            )
-        audit_json = json.dumps(result.audit.model_dump(mode="json"), ensure_ascii=False, indent=2)
-        st.download_button("Prüfbericht herunterladen", audit_json, "pruefbericht.json", "application/json")
+            ])
+            unusual = result.audit.inspection.characters
+            if unusual:
+                st.subheader("Ungewöhnliche Zeichen")
+                st.write(
+                    f"{len(unusual)} Vorkommen in {len(result.audit.inspection.character_summary)} "
+                    "Zeichentyp(en) erkannt. Unbekannte Muster wurden beibehalten."
+                )
+            audit_json = json.dumps(result.audit.model_dump(mode="json"), ensure_ascii=False, indent=2)
+            st.download_button("Prüfbericht herunterladen", audit_json, "pruefbericht.json", "application/json")
 
     if st.button("Neuen Text bearbeiten"):
         st.session_state.source_text = ""

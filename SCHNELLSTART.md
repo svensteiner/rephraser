@@ -1,10 +1,20 @@
 # Text verbessern – Schnellstart
 
+## Portable Windows-Version (empfohlen)
+
+1. Entpacke die ZIP-Datei vollständig in einen lokalen Ordner.
+2. Lasse **TextVerbessern.exe** und den Ordner **_internal** zusammen.
+3. Doppelklicke auf **TextVerbessern.exe**.
+4. Füge den Text ein, klicke auf **Text verbessern** und danach auf **Ergebnis kopieren**.
+
+Python, Administratorrechte und eine Installation sind dafür nicht erforderlich.
+
+## Start aus dem Quellcode
+
 1. Doppelklicke auf **TEXT VERBESSERN.cmd**.
 2. Beim ersten Start wird die Anwendung einmalig eingerichtet. Das kann einige Minuten dauern.
 3. Der Browser öffnet sich automatisch.
-4. Kopiere deinen Text aus Claude, füge ihn in das große Textfeld ein und klicke auf
-   **Text verbessern**. Der empfohlene Modus liefert das Ergebnis praktisch sofort.
+4. Füge den Text ein und klicke auf **Text verbessern**.
 5. Klicke beim fertigen Text auf **Ergebnis kopieren**.
 
 Im Browser stehen Original und Ergebnis nach der Bearbeitung nebeneinander. Zusätzliche

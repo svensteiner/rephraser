@@ -32,25 +32,39 @@ jobs:
       - name: Test packaged application
         shell: pwsh
         run: |
+          $expectedVersion = python -c "from app import __version__; print(__version__)"
+          $exePath = (Resolve-Path '.\dist\TextVerbessern\TextVerbessern.exe').Path
+          $versionInfo = (Get-Item -LiteralPath $exePath).VersionInfo
+          if ($versionInfo.ProductVersion -ne $expectedVersion) {
+            throw "ProductVersion mismatch: $($versionInfo.ProductVersion) != $expectedVersion"
+          }
+          if ($versionInfo.ProductName -ne 'Editorial Transformer') {
+            throw "ProductName metadata is missing"
+          }
           $info = [System.Diagnostics.ProcessStartInfo]::new()
-          $info.FileName = (Resolve-Path '.\dist\TextVerbessern.exe').Path
+          $info.FileName = $exePath
           $info.Arguments = '--self-test'
           $info.UseShellExecute = $false
           $info.CreateNoWindow = $true
           $process = [System.Diagnostics.Process]::new()
           $process.StartInfo = $info
           if (-not $process.Start()) { throw "Packaged application did not start" }
-          if (-not $process.WaitForExit(60000)) {
+          $started = [System.Diagnostics.Stopwatch]::StartNew()
+          if (-not $process.WaitForExit(30000)) {
             $process.Kill()
             throw "Packaged self-test timed out"
           }
+          $started.Stop()
           if ($process.ExitCode -ne 0) { throw "Packaged self-test failed" }
+          Write-Host "Packaged startup+self-test: $([math]::Round($started.Elapsed.TotalSeconds, 2)) s"
       - name: Create download archive
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force portable | Out-Null
-          Copy-Item dist\TextVerbessern.exe portable\TextVerbessern.exe
+          Copy-Item dist\TextVerbessern\* portable -Recurse -Force
           Copy-Item SCHNELLSTART.md portable\SCHNELLSTART.md
+          $version = python -c "from app import __version__; print(__version__)"
+          Set-Content portable\VERSION.txt -Value $version -Encoding UTF8
           @"
           TEXT VERBESSERN – PORTABLE VERSION
 
@@ -63,6 +77,19 @@ jobs:
           "Gründlich mit Mistral" ist optional und benötigt ein lokal laufendes Ollama-Modell.
           Es gibt keinen Cloud-Fallback.
           "@ | Set-Content portable\STARTEN.txt -Encoding UTF8
+          $files = Get-ChildItem portable -Recurse -File | ForEach-Object {
+            [ordered]@{
+              path = [IO.Path]::GetRelativePath((Resolve-Path portable), $_.FullName).Replace('\', '/')
+              bytes = $_.Length
+              sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName).Hash.ToLowerInvariant()
+            }
+          }
+          [ordered]@{
+            version = $version
+            commit = $env:GITHUB_SHA
+            built_utc = [DateTime]::UtcNow.ToString('o')
+            files = @($files)
+          } | ConvertTo-Json -Depth 5 | Set-Content portable\release-manifest.json -Encoding UTF8
           Compress-Archive -Path portable\* -DestinationPath TextVerbessern-Windows.zip -Force
       - uses: actions/upload-artifact@v4
         with:

@@ -147,6 +147,12 @@ Local Mistral calls have both socket limits and a hard wall-clock deadline. If t
 unavailable or responds too slowly, the application returns conservative local cleanup and never
 falls back to a cloud service.
 
+The Windows download uses a portable folder build for faster startup. Keep `TextVerbessern.exe`
+and its `_internal` folder together after extracting the ZIP. `VERSION.txt` and
+`release-manifest.json` identify the exact version, commit and SHA-256 file hashes. Privacy-safe
+desktop diagnostics contain only event codes, version and exception type—not entered text—and are
+stored under `%LOCALAPPDATA%\LLP\EditorialTransformer\logs`.
+
 ## Open-source design influences
 
 The implementation does not copy third-party code, but it adopts useful product ideas from mature
