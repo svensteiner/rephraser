@@ -21,3 +21,36 @@ def test_german_dates_currency_crypto_curly_quotes_and_url_punctuation() -> None
     assert "0,005 BTC" in result.numbers
     assert "“Quote.”" in result.quotations
     assert result.citations == ["https://example.org/a"]
+
+
+def test_date_components_are_not_duplicated_as_numbers() -> None:
+    result = extract_semantics("Die Marge betrug am 3. März 2026 exakt 12,5 %.")
+    assert result.dates == ["3. März 2026"]
+    assert result.numbers == ["12,5 %"]
+
+
+def test_names_are_conservative_and_do_not_cross_lines() -> None:
+    text = (
+        "# Quartalsanalyse\n\nDie Marge blieb stabil. Der Ausblick ist vorsichtig. "
+        "Jörg Müller kontaktierte DAI Global Belgium und UniCredit BulBank."
+    )
+    result = extract_semantics(text)
+    assert "Jörg Müller" in result.names
+    assert "DAI Global Belgium" in result.names
+    assert "UniCredit BulBank" in result.names
+    assert "Die Marge" not in result.names
+    assert "Der Ausblick" not in result.names
+    assert all("\n" not in name for name in result.names)
+
+
+def test_all_non_uncertain_claims_are_retained() -> None:
+    text = " ".join(f"Claim {index} is confirmed." for index in range(1, 13))
+    result = extract_semantics(text)
+    assert len(result.core_claims) == 12
+
+
+def test_expanded_uncertainty_language_is_not_treated_as_certain_claim() -> None:
+    text = "Die Marge dürfte steigen. The result likely improves. Der Umsatz ist bestätigt."
+    result = extract_semantics(text)
+    assert len(result.uncertainties) == 2
+    assert result.core_claims == ["Der Umsatz ist bestätigt."]

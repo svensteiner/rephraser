@@ -18,7 +18,7 @@ from .rewrite import rewrite_text
 from .semantic import extract_semantics
 from .validation import validate_preservation
 
-PIPELINE_VERSION = "1.1.0"
+PIPELINE_VERSION = "1.1.1"
 
 
 def get_provider(name: str) -> EditorialProvider:

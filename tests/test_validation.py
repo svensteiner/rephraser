@@ -33,3 +33,12 @@ def test_duplicate_protected_fact_is_rejected() -> None:
         constraints,
     )
     assert any(w.kind == "altered_number_count" for w in warnings)
+
+
+def test_new_name_and_quotation_are_reported_symmetrically() -> None:
+    original = "Die Marge blieb stabil."
+    rewritten = 'Die Marge blieb stabil. Anna Müller sagte: "Bestätigt."'
+    warnings = validate_preservation(original, rewritten, extract_semantics(original))
+    kinds = {warning.kind for warning in warnings}
+    assert "new_proper_name" in kinds
+    assert "new_quotation" in kinds

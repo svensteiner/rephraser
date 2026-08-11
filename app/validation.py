@@ -37,9 +37,13 @@ def validate_preservation(original: str, rewritten: str, constraints: SemanticCo
                 warnings.append(ValidationWarning(kind="altered_citation_format", severity="high",
                     value=citation, message="Citation or URL embedding changed in the rewrite."))
     new_semantics = extract_semantics(rewritten)
-    for kind, values, originals in (("number", new_semantics.numbers if preserve_numbers else [], constraints.numbers),
-                                    ("date", new_semantics.dates if preserve_numbers else [], constraints.dates),
-                                    ("citation", new_semantics.citations if preserve_citations else [], constraints.citations)):
+    for kind, values, originals in (
+        ("number", new_semantics.numbers if preserve_numbers else [], constraints.numbers),
+        ("date", new_semantics.dates if preserve_numbers else [], constraints.dates),
+        ("proper_name", new_semantics.names, constraints.names),
+        ("citation", new_semantics.citations if preserve_citations else [], constraints.citations),
+        ("quotation", new_semantics.quotations if preserve_quotations else [], constraints.quotations),
+    ):
         for value in values:
             if value not in originals:
                 warnings.append(ValidationWarning(kind=f"new_{kind}", severity="high", value=value,

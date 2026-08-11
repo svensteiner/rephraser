@@ -12,3 +12,10 @@ def test_unicode_markdown_and_lists() -> None:
 def test_german_named_date_does_not_split_sentence() -> None:
     sentences = split_sentences("Am 3. März 2026 war der Wert stabil. Danach stieg er.")
     assert sentences == ["Am 3. März 2026 war der Wert stabil.", "Danach stieg er."]
+
+
+def test_sentence_split_keeps_closing_quote_with_preceding_sentence() -> None:
+    assert split_sentences('Er sagte: "Hallo." Danach ging er.') == [
+        'Er sagte: "Hallo."',
+        "Danach ging er.",
+    ]
