@@ -116,7 +116,7 @@ def validate_preservation(original: str, rewritten: str, constraints: SemanticCo
         if len(terms) < 4:
             continue
         best_recall = max((len(terms & candidate) / len(terms) for candidate in rewritten_claim_terms), default=0.0)
-        if best_recall < 0.35:
+        if best_recall < 0.30:
             warnings.append(ValidationWarning(
                 kind="missing_or_reassigned_claim",
                 severity="high",

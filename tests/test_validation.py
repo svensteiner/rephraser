@@ -61,3 +61,10 @@ def test_detects_markdown_structure_and_code_changes() -> None:
     warnings = validate_preservation(original, rewritten, extract_semantics(original))
     changed = [warning.value for warning in warnings if warning.kind == "altered_markdown_structure"]
     assert {"fenced_code", "inline_code", "headings", "lists", "hard_breaks"} <= set(changed)
+
+
+def test_accepts_compact_claim_with_same_subject_and_intent() -> None:
+    original = "We would like to better understand the account structure."
+    rewritten = "Account structure details requested."
+    warnings = validate_preservation(original, rewritten, extract_semantics(original))
+    assert not any(w.kind == "missing_or_reassigned_claim" for w in warnings)

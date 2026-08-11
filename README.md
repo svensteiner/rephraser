@@ -142,3 +142,19 @@ semantic equivalence. Any missing protected value, introduced number/date/citati
 negation or uncertainty, altered Markdown structure, or weakly supported claim becomes a
 warning. Unsafe editorial candidates are rejected in favor of conservative local cleanup.
 Publication remains a human editorial decision.
+
+Local Mistral calls have both socket limits and a hard wall-clock deadline. If the model is
+unavailable or responds too slowly, the application returns conservative local cleanup and never
+falls back to a cloud service.
+
+## Open-source design influences
+
+The implementation does not copy third-party code, but it adopts useful product ideas from mature
+open-source paraphrasing work. Parrot's separation of adequacy, fluency and surface diversity
+inspired the explicit surface-change indicator and the strict preservation gate. Rasa's scored
+paraphrase workflow reinforced the decision to keep generation separate from validation. Unlike
+those augmentation tools, Editorial Transformer is optimized for complete business documents,
+Markdown preservation and a single reviewed result rather than many candidate sentences.
+
+- [Parrot Paraphraser (Apache-2.0)](https://github.com/PrithivirajDamodaran/Parrot_Paraphraser)
+- [RasaHQ Paraphraser](https://github.com/RasaHQ/paraphraser)

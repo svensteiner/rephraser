@@ -243,6 +243,10 @@ if result is not None:
             for warning in result.audit.fact_preservation_warnings:
                 st.warning(f"{warning.message} Wert: {warning.value}")
         st.subheader("Änderungen")
+        st.caption(
+            f"Wortlaut verändert: {result.audit.diff.surface_diversity:.0%} "
+            "(Oberflächenvergleich; keine Aussage über semantische Gleichheit)."
+        )
         st.code("\n".join(result.audit.diff.sentence_diff) or "Keine Änderungen", language="diff", wrap_lines=True)
         st.subheader("Qualität vor und nach der Bearbeitung")
         before = result.audit.quality_metrics_before

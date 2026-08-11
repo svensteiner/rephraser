@@ -9,6 +9,9 @@ from .models import DiffReport
 
 def create_diff(original: str, rewritten: str) -> DiffReport:
     old_words, new_words = re.findall(r"\S+\s*", original), re.findall(r"\S+\s*", rewritten)
+    old_tokens = [token.casefold() for token in re.findall(r"\b\w+\b", original)]
+    new_tokens = [token.casefold() for token in re.findall(r"\b\w+\b", rewritten)]
+    lexical_similarity = difflib.SequenceMatcher(None, old_tokens, new_tokens).ratio()
     old_sentences, new_sentences = split_sentences(original), split_sentences(rewritten)
     word_diff = list(difflib.ndiff(old_words, new_words))
     sentence_diff = list(difflib.ndiff(old_sentences, new_sentences))
@@ -25,5 +28,7 @@ def create_diff(original: str, rewritten: str) -> DiffReport:
             if len(old) > len(new): removed.extend(old[len(new):])
             if len(new) > len(old): added.extend(new[len(old):])
     return DiffReport(word_diff=word_diff, sentence_diff=sentence_diff,
+        lexical_similarity=round(lexical_similarity, 3),
+        surface_diversity=round(1.0 - lexical_similarity, 3),
         added_sentences=added, removed_sentences=removed,
         substantially_rewritten_sentences=[item for item in rewritten_items if item["similarity"] < .7])

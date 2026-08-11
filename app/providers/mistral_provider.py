@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import queue
+import threading
 import urllib.error
 import urllib.request
 
@@ -29,6 +31,40 @@ class LocalMistralProvider(EditorialProvider):
         except ValueError:
             configured_timeout = 45
         self.timeout = min(180.0, max(5.0, configured_timeout))
+
+    def _request_with_deadline(self, request: urllib.request.Request) -> bytes:
+        """Enforce a wall-clock deadline in addition to urllib's idle timeout."""
+        completed: queue.Queue[tuple[str, object]] = queue.Queue(maxsize=1)
+        active_response: dict[str, object] = {}
+
+        def request_worker() -> None:
+            try:
+                opener = urllib.request.build_opener(NoRedirect)
+                with opener.open(request, timeout=self.timeout) as response:
+                    active_response["value"] = response
+                    raw = response.read(5_000_001)
+                completed.put(("result", raw))
+            except Exception as error:
+                completed.put(("error", error))
+
+        worker = threading.Thread(target=request_worker, daemon=True, name="local-mistral-request")
+        worker.start()
+        worker.join(self.timeout)
+        if worker.is_alive():
+            response = active_response.get("value")
+            if response is not None:
+                try:
+                    response.close()
+                except Exception:
+                    pass
+            raise ProviderError(
+                f"Local Mistral exceeded the {self.timeout:g}-second total deadline; "
+                "no cloud fallback was attempted."
+            )
+        status, value = completed.get_nowait()
+        if status == "error":
+            raise value  # type: ignore[misc]
+        return value  # type: ignore[return-value]
 
     def rewrite(self, text: str, constraints: SemanticConstraints, options: TransformOptions) -> str:
         if len(text) > self.max_characters:
@@ -76,12 +112,10 @@ class LocalMistralProvider(EditorialProvider):
         request = urllib.request.Request(self.base_url + "/api/generate", data=body,
             headers={"Content-Type": "application/json"}, method="POST")
         try:
-            opener = urllib.request.build_opener(NoRedirect)
-            with opener.open(request, timeout=self.timeout) as response:
-                raw = response.read(5_000_001)
-                if len(raw) > 5_000_000:
-                    raise ProviderError("Local Mistral response exceeds the 5 MB safety limit.")
-                payload = json.loads(raw)
+            raw = self._request_with_deadline(request)
+            if len(raw) > 5_000_000:
+                raise ProviderError("Local Mistral response exceeds the 5 MB safety limit.")
+            payload = json.loads(raw)
         except (OSError, urllib.error.URLError, json.JSONDecodeError) as error:
             raise ProviderError(f"Local Mistral request failed; no cloud fallback was attempted: {error}") from error
         if not isinstance(payload, dict) or not isinstance(payload.get("response"), str):

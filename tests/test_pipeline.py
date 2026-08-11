@@ -91,6 +91,8 @@ def test_audit_has_required_fields_and_no_ai_score() -> None:
                   "quality_metrics_before", "quality_metrics_after"]:
         assert field in data
     assert "ai_probability" not in data
+    assert 0 <= result.audit.diff.lexical_similarity <= 1
+    assert 0 <= result.audit.diff.surface_diversity <= 1
 
 
 def test_audit_records_before_after_unicode_and_explicit_edit_offsets() -> None:

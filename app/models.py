@@ -107,6 +107,8 @@ class ValidationWarning(BaseModel):
 class DiffReport(BaseModel):
     word_diff: list[str]
     sentence_diff: list[str]
+    lexical_similarity: float
+    surface_diversity: float
     added_sentences: list[str]
     removed_sentences: list[str]
     substantially_rewritten_sentences: list[dict[str, Any]]

@@ -1,4 +1,6 @@
 import json
+import threading
+import time
 
 import pytest
 
@@ -88,3 +90,34 @@ def test_mistral_exact_value_options_control_the_mandatory_prompt(monkeypatch) -
     LocalMistralProvider().rewrite(text, extract_semantics(text), options)
     mandatory_json = captured["prompt"].split("Mandatory exact strings: ", 1)[1].splitlines()[0]
     assert json.loads(mandatory_json) == ["Anna Müller"]
+
+
+def test_mistral_enforces_wall_clock_deadline_and_closes_slow_response(monkeypatch) -> None:
+    closed = threading.Event()
+
+    class SlowResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            self.close()
+
+        def read(self, limit):
+            closed.wait(2)
+            return b'{"response": "too late"}'
+
+        def close(self):
+            closed.set()
+
+    class Opener:
+        def open(self, request, timeout):
+            return SlowResponse()
+
+    monkeypatch.setattr("urllib.request.build_opener", lambda *handlers: Opener())
+    provider = LocalMistralProvider()
+    provider.timeout = 0.05
+    started = time.monotonic()
+    with pytest.raises(ProviderError, match="total deadline"):
+        provider.rewrite("Ein Satz.", extract_semantics("Ein Satz."), TransformOptions())
+    assert time.monotonic() - started < 0.5
+    assert closed.wait(0.5)
