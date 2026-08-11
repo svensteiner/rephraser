@@ -18,7 +18,9 @@ FENCED_BLOCK = re.compile(
 )
 INLINE_CODE = re.compile(r"(?<!`)`{1,2}[^\n]+?`{1,2}(?!`)")
 LINK_TARGET = re.compile(r"\]\(([^)\n]+)\)")
-CLAUSE_SPLIT = re.compile(r"(?:;|\b(?:while|whereas|and|but|während|hingegen|und|aber)\b)", re.I)
+CLAUSE_SPLIT = re.compile(
+    r"(?:;|\r?\n+|\b(?:while|whereas|and|but|während|hingegen|und|aber)\b)", re.I
+)
 ASSOCIATION_STOPWORDS = {
     "also", "been", "being", "dem", "den", "der", "des", "die", "eine", "einer", "eines",
     "for", "from", "hat", "haben", "ist", "mit", "the", "this", "to", "von", "war", "was",
@@ -45,26 +47,28 @@ def _content_terms(sentence: str) -> set[str]:
     return {term.casefold() for term in CONTENT_WORD.findall(sentence)}
 
 
-def _numeric_clause_anchors(text: str, values: list[str]) -> dict[str, set[str]]:
+def _value_clause_anchors(text: str, values: list[str]) -> dict[str, set[str]]:
     anchors = {value: set() for value in values}
     for clause in CLAUSE_SPLIT.split(text):
         present = [value for value in values if value in clause]
         if not present:
             continue
-        without_numbers = re.sub(NUMBER, " ", clause, flags=re.I)
-        terms = _content_terms(without_numbers) - ASSOCIATION_STOPWORDS
+        context = clause
+        for protected in values:
+            context = context.replace(protected, " ")
+        terms = _content_terms(context) - ASSOCIATION_STOPWORDS
         for value in present:
             anchors[value].update(terms)
     return anchors
 
 
-def _reassigned_numeric_values(original: str, rewritten: str, values: list[str]) -> list[str]:
-    """Detect strong evidence that preserved numbers exchanged their factual contexts."""
+def _reassigned_values(original: str, rewritten: str, values: list[str]) -> list[str]:
+    """Detect strong evidence that protected values exchanged factual contexts."""
     unique_values = list(dict.fromkeys(values))
     if len(unique_values) < 2:
         return []
-    original_anchors = _numeric_clause_anchors(original, unique_values)
-    rewritten_anchors = _numeric_clause_anchors(rewritten, unique_values)
+    original_anchors = _value_clause_anchors(original, unique_values)
+    rewritten_anchors = _value_clause_anchors(rewritten, unique_values)
     reassigned = []
     for value in unique_values:
         own_context = original_anchors[value]
@@ -152,13 +156,20 @@ def validate_preservation(original: str, rewritten: str, constraints: SemanticCo
             message="The number of explicit uncertainty markers changed in the rewrite.",
         ))
 
-    if preserve_numbers:
-        for value in _reassigned_numeric_values(original, rewritten, constraints.numbers):
+    association_groups = [
+        ("numeric", constraints.numbers if preserve_numbers else []),
+        ("date", constraints.dates if preserve_numbers else []),
+        ("proper_name", constraints.names),
+        ("citation", constraints.citations if preserve_citations else []),
+        ("quotation", constraints.quotations if preserve_quotations else []),
+    ]
+    for kind, values in association_groups:
+        for value in _reassigned_values(original, rewritten, values):
             warnings.append(ValidationWarning(
-                kind="reassigned_numeric_context",
+                kind=f"reassigned_{kind}_context",
                 severity="high",
                 value=value,
-                message="A preserved number appears to have moved to another factual context.",
+                message=f"A preserved {kind.replace('_', ' ')} appears to have moved to another factual context.",
             ))
 
     rewritten_claim_terms = [_content_terms(sentence) for sentence in new_semantics.core_claims]

@@ -83,3 +83,18 @@ def test_allows_rewording_around_numbers_when_associations_stay_intact() -> None
     rewritten = "Revenue rose to EUR 10; operating profit fell to EUR 5."
     warnings = validate_preservation(original, rewritten, extract_semantics(original))
     assert not any(w.kind == "reassigned_numeric_context" for w in warnings)
+
+
+def test_detects_names_swapped_between_claims() -> None:
+    original = "Anna Müller approved the audit; Bernd Klein rejected the proposal."
+    rewritten = "Bernd Klein approved the audit; Anna Müller rejected the proposal."
+    warnings = validate_preservation(original, rewritten, extract_semantics(original))
+    reassigned = {warning.value for warning in warnings if warning.kind == "reassigned_proper_name_context"}
+    assert reassigned == {"Anna Müller", "Bernd Klein"}
+
+
+def test_detects_numbers_swapped_between_markdown_list_items() -> None:
+    original = "- Revenue increased to EUR 10\n- Operating profit declined to EUR 5"
+    rewritten = "- Revenue increased to EUR 5\n- Operating profit declined to EUR 10"
+    warnings = validate_preservation(original, rewritten, extract_semantics(original))
+    assert any(w.kind == "reassigned_numeric_context" for w in warnings)

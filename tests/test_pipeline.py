@@ -49,6 +49,13 @@ class NumericContextSwapStub(EditorialProvider):
         return "Revenue increased to EUR 5; operating profit declined to EUR 10."
 
 
+class NameContextSwapStub(EditorialProvider):
+    name = "mistral-test"
+
+    def rewrite(self, text, constraints, options):
+        return "Bernd Klein approved the audit; Anna Müller rejected the proposal."
+
+
 def test_rules_preserve_protected_content_and_umlauts() -> None:
     text = ('Es ist wichtig zu beachten, dass Jörg Müller am 31.12.2025 „Grüße“ sagte. '
             'Der Wert war 1.250,50 EUR (12,5 %). https://example.com/x')
@@ -202,3 +209,11 @@ def test_numeric_context_swap_is_rejected_by_pipeline() -> None:
     assert result.rewritten_text == text
     rejection = next(w for w in result.audit.fact_preservation_warnings if w.kind == "rewrite_rejected")
     assert "reassigned_numeric_context" in rejection.value
+
+
+def test_name_context_swap_is_rejected_by_pipeline() -> None:
+    text = "Anna Müller approved the audit; Bernd Klein rejected the proposal."
+    result = run_pipeline(text, TransformOptions(provider="rules"), provider=NameContextSwapStub())
+    assert result.rewritten_text == text
+    rejection = next(w for w in result.audit.fact_preservation_warnings if w.kind == "rewrite_rejected")
+    assert "reassigned_proper_name_context" in rejection.value

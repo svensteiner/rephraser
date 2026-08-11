@@ -173,6 +173,11 @@ class DesktopApp:
         ttk.Button(self.bottom, text="Speichern", command=self.save_result, style="Secondary.TButton").pack(
             side="right", padx=(0, 8)
         )
+        ttk.Label(
+            outer,
+            text="Tastatur: Strg+Enter verbessern · Strg+Umschalt+C Ergebnis kopieren",
+            style="Hint.TLabel",
+        ).pack(anchor="e", pady=(8, 0))
 
         self.root.bind("<Control-Return>", lambda _event: self.start_processing())
         self.root.bind("<Control-Shift-C>", lambda _event: self.copy_result())
