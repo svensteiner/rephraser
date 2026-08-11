@@ -121,7 +121,8 @@ Invoke-RestMethod http://127.0.0.1:8000/transform -Method Post -ContentType appl
 ```
 
 Each result includes the rewritten text and an audit with SHA-256 input hash, UTC time,
-pipeline version, inspection, semantic constraints, transformations, preservation
+pipeline version, before/after Unicode inspection, grouped code-point counts and positions,
+semantic constraints, transformations with explicit original/result offsets, preservation
 warnings, word/sentence diff, and before/after descriptive quality metrics.
 
 ## Fail-safe limits

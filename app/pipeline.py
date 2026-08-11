@@ -18,7 +18,7 @@ from .rewrite import rewrite_text
 from .semantic import extract_semantics
 from .validation import validate_preservation
 
-PIPELINE_VERSION = "1.1.1"
+PIPELINE_VERSION = "1.2.0"
 
 
 def get_provider(name: str) -> EditorialProvider:
@@ -82,10 +82,12 @@ def run_pipeline(text: str, options: TransformOptions | None = None,
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
         if tag != "equal":
             transformations.append(Transformation(kind=tag, before=text[i1:i2], after=rewritten[j1:j2],
-                reason=f"{active_provider.name} editorial transformation at original offsets {i1}:{i2}"))
+                reason=f"{active_provider.name} editorial transformation at original offsets {i1}:{i2}",
+                original_start=i1, original_end=i2, rewritten_start=j1, rewritten_end=j2))
     audit = AuditReport(original_hash=hashlib.sha256(text.encode("utf-8")).hexdigest(),
         timestamp=datetime.now(timezone.utc), pipeline_version=PIPELINE_VERSION,
-        inspection=inspection, semantic_constraints=semantics, transformations=transformations,
+        inspection=inspection, inspection_after=inspect_text(rewritten),
+        semantic_constraints=semantics, transformations=transformations,
         fact_preservation_warnings=warnings, quality_metrics_before=before_metrics,
         quality_metrics_after=calculate_metrics(rewritten), diff=create_diff(text, rewritten),
         safeguard=("Editorial and provenance audit only. No AI probability is calculated, and no "

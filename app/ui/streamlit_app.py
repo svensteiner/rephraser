@@ -177,6 +177,8 @@ if run:
                 st.session_state.processing_note = "Mistral war nicht rechtzeitig verfügbar; sicher bereinigt."
             elif was_rejected:
                 st.session_state.processing_note = "Lokal sicher bereinigt; die Modellfassung wurde verworfen."
+            elif st.session_state.result.rewritten_text == st.session_state.source_text:
+                st.session_state.processing_note = "Keine sichere Verbesserung erforderlich – Text unverändert."
             elif "mistral" in provider:
                 st.session_state.processing_note = "Lokal mit Regeln und Mistral verarbeitet."
             elif provider == "fast-editor":
@@ -207,6 +209,8 @@ if result is not None:
         st.warning("Die sprachliche Fassung wurde vorsichtshalber verworfen. Der sicher bereinigte Text wird angezeigt.")
     elif warning_count:
         st.warning(f"Bitte kurz prüfen: {warning_count} mögliche Abweichung(en) wurden gefunden.")
+    elif not result.audit.transformations:
+        st.info("Der Text ist unverändert; es wurde keine sichere Verbesserung benötigt oder gefunden.")
     else:
         st.success("Keine auffälligen Änderungen an Zahlen, Daten, Namen, Zitaten oder Links gefunden.")
 
@@ -227,7 +231,10 @@ if result is not None:
         unusual = result.audit.inspection.characters
         if unusual:
             st.subheader("Ungewöhnliche Zeichen")
-            st.write(f"{len(unusual)} Zeichen wurden erkannt. Unbekannte Muster wurden beibehalten.")
+            st.write(
+                f"{len(unusual)} Vorkommen in {len(result.audit.inspection.character_summary)} "
+                "Zeichentyp(en) erkannt. Unbekannte Muster wurden beibehalten."
+            )
         audit_json = json.dumps(result.audit.model_dump(mode="json"), ensure_ascii=False, indent=2)
         st.download_button("Prüfbericht herunterladen", audit_json, "pruefbericht.json", "application/json")
 

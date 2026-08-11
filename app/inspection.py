@@ -4,7 +4,7 @@ from collections import Counter
 import re
 import unicodedata
 
-from .models import CharacterFinding, InspectionReport
+from .models import CharacterFinding, CharacterSummary, InspectionReport
 
 KNOWN = {"\u200b": "zero_width", "\u200c": "zero_width", "\u200d": "zero_width",
          "\ufeff": "BOM", "\u00ad": "soft_hyphen", "\u00a0": "non_breaking_space",
@@ -49,6 +49,21 @@ def inspect_text(text: str) -> InspectionReport:
         if kind:
             findings.append(CharacterFinding(position=pos, code_point=f"U+{ord(char):04X}",
                 name=unicodedata.name(char, "<unnamed>"), category=category, kind=kind))
+    grouped: dict[tuple[str, str, str, str], list[int]] = {}
+    for finding in findings:
+        key = (finding.code_point, finding.name, finding.category, finding.kind)
+        grouped.setdefault(key, []).append(finding.position)
+    summary = [
+        CharacterSummary(
+            code_point=code_point,
+            name=name,
+            category=category,
+            kind=kind,
+            count=len(positions),
+            positions=positions,
+        )
+        for (code_point, name, category, kind), positions in grouped.items()
+    ]
     sentences = split_sentences(text)
     lengths = [len(re.findall(r"\b[\w'-]+\b", sentence)) for sentence in sentences]
     words = [w.casefold() for w in re.findall(r"\b[^\W\d_][\w'-]*\b", text)]
@@ -64,7 +79,8 @@ def inspect_text(text: str) -> InspectionReport:
                 if re.match(r"^#{1,6}\s+", line) or re.match(r"^[A-ZÄÖÜ][^.!?]{1,60}:$", line)]
     list_items = sum(bool(re.match(r"^\s*(?:[-*+] |\d+[.)] )", line)) for line in text.splitlines())
     paragraphs = len([p for p in re.split(r"\r?\n\s*\r?\n", text) if p.strip()])
-    return InspectionReport(characters=findings, paragraphs=paragraphs, sentences=len(sentences),
+    return InspectionReport(characters=findings, character_summary=summary,
+        paragraphs=paragraphs, sentences=len(sentences),
         sentence_lengths=lengths, repeated_phrases=repetitions,
         lexical_repetition={k: v for k, v in word_counts.most_common(10) if v > 2},
         transition_phrases=transitions, uniform_sentence_pattern=uniform,

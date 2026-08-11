@@ -71,10 +71,34 @@ def test_audit_has_required_fields_and_no_ai_score() -> None:
     result = run_pipeline("Ein klarer Satz.")
     data = result.audit.model_dump(mode="json")
     for field in ["original_hash", "timestamp", "pipeline_version", "inspection",
+                  "inspection_after",
                   "semantic_constraints", "transformations", "fact_preservation_warnings",
                   "quality_metrics_before", "quality_metrics_after"]:
         assert field in data
     assert "ai_probability" not in data
+
+
+def test_audit_records_before_after_unicode_and_explicit_edit_offsets() -> None:
+    text = "A\u200bB\u200b C\u00a0D"
+    result = run_pipeline(text, TransformOptions(provider="rules"))
+    before = {item.code_point: item for item in result.audit.inspection.character_summary}
+    after = {item.code_point: item for item in result.audit.inspection_after.character_summary}
+    assert before["U+200B"].count == 2
+    assert before["U+200B"].positions == [1, 3]
+    assert before["U+00A0"].count == 1
+    assert "U+200B" not in after
+    assert "U+00A0" not in after
+    assert result.audit.transformations
+    for change in result.audit.transformations:
+        assert change.before == text[change.original_start:change.original_end]
+        assert change.after == result.rewritten_text[change.rewritten_start:change.rewritten_end]
+
+
+def test_unknown_format_character_is_visible_before_and_after_because_it_is_preserved() -> None:
+    result = run_pipeline("A\u2066B", TransformOptions(provider="rules"))
+    assert result.rewritten_text == "A\u2066B"
+    assert result.audit.inspection.character_summary[0].code_point == "U+2066"
+    assert result.audit.inspection_after.character_summary[0].code_point == "U+2066"
 
 
 def test_unsafe_mistral_result_is_rejected_safely() -> None:

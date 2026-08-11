@@ -47,8 +47,18 @@ class CharacterFinding(BaseModel):
     kind: str
 
 
+class CharacterSummary(BaseModel):
+    code_point: str
+    name: str
+    category: str
+    kind: str
+    count: int
+    positions: list[int]
+
+
 class InspectionReport(BaseModel):
     characters: list[CharacterFinding] = Field(default_factory=list)
+    character_summary: list[CharacterSummary] = Field(default_factory=list)
     paragraphs: int
     sentences: int
     sentence_lengths: list[int]
@@ -107,6 +117,10 @@ class Transformation(BaseModel):
     before: str
     after: str
     reason: str
+    original_start: int
+    original_end: int
+    rewritten_start: int
+    rewritten_end: int
 
 
 class TransformRequest(BaseModel):
@@ -120,6 +134,7 @@ class AuditReport(BaseModel):
     timestamp: datetime
     pipeline_version: str
     inspection: InspectionReport
+    inspection_after: InspectionReport
     semantic_constraints: SemanticConstraints
     transformations: list[Transformation]
     fact_preservation_warnings: list[ValidationWarning]

@@ -275,9 +275,11 @@ class DesktopApp:
         self.input_text.configure(state="normal")
         self.mode_box.configure(state="readonly")
         rewritten = result.rewritten_text
+        source = self.input_text.get("1.0", "end-1c")
+        changed = rewritten != source
         self.output_text.delete("1.0", "end")
         self.output_text.insert("1.0", rewritten)
-        self.processed_source = self.input_text.get("1.0", "end-1c")
+        self.processed_source = source
         self.copy_button.configure(state="normal")
         warning_kinds = {warning.kind for warning in result.audit.fact_preservation_warnings}
         if "provider_unavailable" in warning_kinds:
@@ -286,10 +288,12 @@ class DesktopApp:
             message = "Sicher bereinigt; eine unsichere Modellfassung wurde verworfen."
         elif result.audit.fact_preservation_warnings:
             message = f"Fertig – bitte {len(result.audit.fact_preservation_warnings)} Prüfhinweis(e) beachten."
+        elif not changed:
+            message = "Keine sichere Verbesserung erforderlich – der Text ist unverändert."
         elif "mistral" in provider:
-            message = "Fertig – lokal überarbeitet; geschützte Angaben ohne Auffälligkeit."
+            message = f"Fertig – lokal überarbeitet ({len(result.audit.transformations)} Änderungen)."
         elif provider == "fast-editor":
-            message = "Fertig – sofort und vollständig lokal verbessert."
+            message = f"Fertig – sofort lokal verbessert ({len(result.audit.transformations)} Änderungen)."
         else:
             message = "Fertig – Formatierungsartefakte bereinigt; der Text wurde nicht sprachlich umformuliert."
         self.result_status.configure(text=message)
@@ -315,6 +319,8 @@ class DesktopApp:
         self.root.clipboard_append(result)
         self.root.update_idletasks()
         self.result_status.configure(text="Kopiert ✓")
+        self.copy_button.configure(text="Kopiert ✓")
+        self.root.after(1600, lambda: self.copy_button.configure(text="Ergebnis kopieren"))
 
     def save_result(self) -> None:
         result = self.output_text.get("1.0", "end-1c")
@@ -337,6 +343,7 @@ class DesktopApp:
         self.input_text.delete("1.0", "end")
         self.output_text.delete("1.0", "end")
         self.copy_button.configure(state="disabled")
+        self.copy_button.configure(text="Ergebnis kopieren")
         self.processed_source = None
         self.source_count.set("0 Wörter · 0 Zeichen")
         self.result_status.configure(
