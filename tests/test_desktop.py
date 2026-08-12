@@ -186,3 +186,35 @@ def test_ui_queue_is_drained_on_main_thread() -> None:
 
     assert received == [("fertig", 9)]
     assert scheduled[0][0] == 50
+
+
+def test_copy_support_info_uses_metadata_report_only() -> None:
+    from app.desktop import DesktopApp
+
+    clipboard = []
+
+    class Root:
+        def clipboard_clear(self):
+            clipboard.clear()
+
+        def clipboard_append(self, value):
+            clipboard.append(value)
+
+        def update_idletasks(self):
+            return None
+
+    class Button:
+        values = {}
+
+        def configure(self, **values):
+            self.values.update(values)
+
+    app = DesktopApp.__new__(DesktopApp)
+    app.root = Root()
+    app.support_text = lambda: "Version 1.7.1\nkein Eingabetext"
+    button = Button()
+
+    app._copy_support_info(button)
+
+    assert clipboard == ["Version 1.7.1\nkein Eingabetext"]
+    assert button.values["text"] == "Kopiert ✓"

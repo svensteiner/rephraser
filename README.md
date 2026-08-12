@@ -24,6 +24,11 @@ wichtige Texte weiterhin selbst gelesen werden sollten.
 Während einer gründlichen Mistral-Bearbeitung liefert **Sichere Fassung jetzt** ohne
 weiteres Warten die lokale Schnellbearbeitung.
 
+**Info & Hilfe** zeigt die installierte Version und den lokalen Modellstatus. Für den
+Support lassen sich datenschutzarme Diagnoseinformationen kopieren. Sie enthalten nur
+Laufzeitmetadaten und den Hinweis, ob ein Metadatenprotokoll vorhanden ist – niemals den
+eingefügten Text, Dokumentinhalte, Benutzernamen oder Fehlermeldungsinhalte.
+
 Die Browser-Oberfläche zeigt nach der Bearbeitung **Original und Ergebnis nebeneinander**.
 Unter **Bearbeitung anpassen** lassen sich Sprache sowie der exakte Schutz von Zahlen
 und Daten, Quellen und Links sowie wörtlichen Zitaten einstellen. Eigennamen und

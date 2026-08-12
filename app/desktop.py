@@ -11,11 +11,13 @@ import time
 
 from app.change_preview import build_change_preview
 from app.local_runtime import LOCAL_MODEL_MAX_CHARACTERS, local_mistral_ready, local_model_eligible
-from app.diagnostics import write_diagnostic_event
+from app import __version__
+from app.diagnostics import diagnostic_log_path, write_diagnostic_event
 from app.models import AuditReport, TransformOptions
 from app.pipeline import run_pipeline
 from app.providers.base import ProviderError
 from app.review_summary import build_review_summary
+from app.support import build_support_info
 from app.ui_state import classify_result_state, result_actions_allowed
 
 
@@ -195,6 +197,13 @@ class DesktopApp:
             style="Hint.TLabel",
         )
         self.result_status.pack(side="left")
+        self.help_button = ttk.Button(
+            self.bottom,
+            text="Info & Hilfe",
+            command=self.open_help,
+            style="Secondary.TButton",
+        )
+        self.help_button.pack(side="left", padx=(12, 0))
         ttk.Button(self.bottom, text="Leeren", command=self.clear_all, style="Secondary.TButton").pack(side="right")
         ttk.Button(self.bottom, text="Speichern", command=self.save_result, style="Secondary.TButton").pack(
             side="right", padx=(0, 8)
@@ -441,6 +450,67 @@ class DesktopApp:
         self.active_request_id += 1
         self.processing_active = False
         self.root.destroy()
+
+    def support_text(self) -> str:
+        """Return metadata-only diagnostics suitable for deliberate clipboard sharing."""
+        return build_support_info(
+            mistral_available=self.mistral_ready,
+            diagnostic_log_available=diagnostic_log_path().exists(),
+        ).as_text()
+
+    def open_help(self) -> None:
+        window = self.tk.Toplevel(self.root)
+        window.title("Info & Hilfe")
+        window.geometry("620x430")
+        window.minsize(540, 380)
+        window.transient(self.root)
+        outer = self.ttk.Frame(window, padding=22)
+        outer.pack(fill="both", expand=True)
+        self.ttk.Label(
+            outer,
+            text=f"TextVerbessern {__version__}",
+            font=("Segoe UI", 17, "bold"),
+        ).pack(anchor="w")
+        self.ttk.Label(
+            outer,
+            text="Lokale, sichere Textüberarbeitung ohne Cloud-Fallback.",
+            wraplength=560,
+        ).pack(anchor="w", pady=(4, 14))
+        model_text = (
+            "✓ Lokales Mistral ist verfügbar."
+            if self.mistral_ready
+            else "Schnelle lokale Bearbeitung ist verfügbar; Mistral ist optional."
+        )
+        self.ttk.Label(outer, text=model_text, font=("Segoe UI", 10, "bold")).pack(anchor="w")
+        self.ttk.Label(
+            outer,
+            text=(
+                "Bei Problemen kannst du die Diagnoseinformationen kopieren und an den Support senden. "
+                "Sie enthalten keinen eingegebenen Text, keine Dokumentinhalte und keine Fehlermeldung."
+            ),
+            wraplength=560,
+        ).pack(anchor="w", pady=(14, 8))
+        report = self.tk.Text(outer, height=10, wrap="word", font=("Consolas", 9), relief="solid", borderwidth=1)
+        report.insert("1.0", self.support_text())
+        report.configure(state="disabled")
+        report.pack(fill="both", expand=True, pady=(0, 12))
+        actions = self.ttk.Frame(outer)
+        actions.pack(fill="x")
+        self.ttk.Button(actions, text="Schließen", command=window.destroy).pack(side="right")
+        copy_button = self.ttk.Button(
+            actions,
+            text="Diagnoseinformationen kopieren",
+            command=lambda: self._copy_support_info(copy_button),
+            style="Primary.TButton",
+        )
+        copy_button.pack(side="right", padx=(0, 8))
+        window.focus_set()
+
+    def _copy_support_info(self, button: object) -> None:
+        self.root.clipboard_clear()
+        self.root.clipboard_append(self.support_text())
+        self.root.update_idletasks()
+        button.configure(text="Kopiert ✓")
 
     def open_change_preview(self) -> None:
         """Show a plain-language, side-by-side review without cluttering the main workflow."""

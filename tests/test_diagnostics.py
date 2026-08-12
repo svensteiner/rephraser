@@ -13,4 +13,4 @@ def test_diagnostic_log_never_contains_exception_message_or_user_text(tmp_path, 
     record = json.loads(content)
     assert record["event"] == "processing_failed"
     assert record["exception_type"] == "RuntimeError"
-    assert record["version"] == "1.7.0"
+    assert record["version"] == "1.7.1"
