@@ -218,3 +218,98 @@ def test_copy_support_info_uses_metadata_report_only() -> None:
 
     assert clipboard == ["Version 1.7.1\nkein Eingabetext"]
     assert button.values["text"] == "Kopiert ✓"
+
+
+def test_individual_change_selection_is_revalidated_and_applied() -> None:
+    from app.change_preview import build_change_segments
+    from app.desktop import DesktopApp
+    from app.models import TransformOptions
+    from app.pipeline import run_pipeline
+
+    class TextBox:
+        value = ""
+
+        def delete(self, start, end):
+            self.value = ""
+
+        def insert(self, start, text):
+            self.value = text
+
+    class Widget:
+        values = {}
+
+        def configure(self, **values):
+            self.values.update(values)
+
+    class Window:
+        destroyed = False
+
+        def destroy(self):
+            self.destroyed = True
+
+    source = "Wir möchten gerne prüfen. Zum jetzigen Zeitpunkt fehlt Beleg 17."
+    rewritten = "Wir möchten prüfen. Derzeit fehlt Beleg 17."
+    result = run_pipeline(source, TransformOptions(provider="fast-editor"))
+    assert result.rewritten_text == rewritten
+    app = DesktopApp.__new__(DesktopApp)
+    app.last_audit = result.audit
+    app.output_text = TextBox()
+    app.copy_button = Widget()
+    app.result_status = Widget()
+    app.messagebox = object()
+    window = Window()
+
+    app._apply_individual_changes(
+        source,
+        build_change_segments(source, rewritten),
+        (True, False),
+        window,
+    )
+
+    assert app.output_text.value == "Wir möchten prüfen. Zum jetzigen Zeitpunkt fehlt Beleg 17."
+    assert app.copy_button.values["state"] == "normal"
+    assert "Geprüfte Einzelauswahl" in app.result_status.values["text"]
+    assert window.destroyed is True
+
+
+def test_individual_change_selection_with_semantic_warning_is_blocked() -> None:
+    from app.change_preview import build_change_segments
+    from app.desktop import DesktopApp
+    from app.models import TransformOptions
+    from app.pipeline import run_pipeline
+
+    warnings = []
+
+    class MessageBox:
+        def showwarning(self, title, message, **kwargs):
+            warnings.append((title, message))
+
+    class Window:
+        destroyed = False
+
+        def destroy(self):
+            self.destroyed = True
+
+    class ForbiddenOutput:
+        def delete(self, start, end):
+            raise AssertionError("unsafe candidate must not be displayed")
+
+    source = "Der Gewinn wird nicht steigen."
+    unsafe = "Der Gewinn wird deutlich steigen."
+    result = run_pipeline(source, TransformOptions(provider="rules"))
+    app = DesktopApp.__new__(DesktopApp)
+    app.last_audit = result.audit
+    app.messagebox = MessageBox()
+    app.output_text = ForbiddenOutput()
+    window = Window()
+
+    app._apply_individual_changes(
+        source,
+        build_change_segments(source, unsafe),
+        (True,),
+        window,
+    )
+
+    assert warnings and warnings[0][0] == "Auswahl nicht übernommen"
+    assert "Verneinung" in warnings[0][1]
+    assert window.destroyed is False

@@ -9,7 +9,7 @@ import sys
 import threading
 import time
 
-from app.change_preview import build_change_preview
+from app.change_preview import ChangeSegment, apply_change_selection, build_change_preview, build_change_segments
 from app.local_runtime import LOCAL_MODEL_MAX_CHARACTERS, local_mistral_ready, local_model_eligible
 from app import __version__
 from app.diagnostics import diagnostic_log_path, write_diagnostic_event
@@ -19,6 +19,7 @@ from app.providers.base import ProviderError
 from app.review_summary import build_review_summary
 from app.support import build_support_info
 from app.ui_state import classify_result_state, result_actions_allowed
+from app.validation import validate_preservation
 
 
 MODE_AUTOMATIC = "Schnell verbessern (empfohlen)"
@@ -26,6 +27,7 @@ MODE_SAFE = "Nur Format bereinigen"
 MODE_STRONG = "Gründlich mit Mistral (bis 45 s)"
 MAX_CHARACTERS = 2_000_000
 CHANGE_PREVIEW_MAX_CHARACTERS = 200_000
+INDIVIDUAL_CHANGE_MAX_GROUPS = 100
 
 
 def processing_settings(mode: str, mistral_ready: bool) -> tuple[str, str]:
@@ -606,7 +608,128 @@ class DesktopApp:
             text="Original verwenden",
             command=lambda: self._use_reviewed_text(source, window, improved=False),
         ).pack(side="right", padx=(0, 8))
+        if 1 < preview.change_groups <= INDIVIDUAL_CHANGE_MAX_GROUPS:
+            self.ttk.Button(
+                actions,
+                text="Änderungen einzeln auswählen",
+                command=lambda: (window.destroy(), self.open_individual_changes(source, rewritten)),
+            ).pack(side="left")
         window.focus_set()
+
+    @staticmethod
+    def _change_excerpt(text: str, *, empty: str) -> str:
+        compact = " ".join(text.split())
+        if not compact:
+            return empty
+        return compact if len(compact) <= 100 else compact[:97] + "…"
+
+    def open_individual_changes(self, source: str, rewritten: str) -> None:
+        """Allow per-change decisions while preserving a mandatory semantic recheck."""
+        segments = build_change_segments(source, rewritten)
+        if not segments or len(segments) > INDIVIDUAL_CHANGE_MAX_GROUPS:
+            return
+        window = self.tk.Toplevel(self.root)
+        window.title("Änderungen einzeln auswählen")
+        window.geometry("820x650")
+        window.minsize(650, 450)
+        window.transient(self.root)
+        outer = self.ttk.Frame(window, padding=18)
+        outer.pack(fill="both", expand=True)
+        self.ttk.Label(
+            outer,
+            text="Welche Verbesserungen möchtest du übernehmen?",
+            font=("Segoe UI", 14, "bold"),
+        ).pack(anchor="w")
+        self.ttk.Label(
+            outer,
+            text=(
+                "Alle Änderungen sind vorausgewählt. Deine Kombination wird vor der Übernahme "
+                "erneut auf geschützte Inhalte und Struktur geprüft."
+            ),
+            wraplength=760,
+        ).pack(anchor="w", pady=(3, 10))
+
+        list_container = self.ttk.Frame(outer)
+        list_container.pack(fill="both", expand=True, pady=(0, 12))
+        canvas = self.tk.Canvas(list_container, highlightthickness=0)
+        scrollbar = self.ttk.Scrollbar(list_container, orient="vertical", command=canvas.yview)
+        list_frame = self.ttk.Frame(canvas)
+        list_window = canvas.create_window((0, 0), window=list_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        list_frame.bind("<Configure>", lambda _event: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>", lambda event: canvas.itemconfigure(list_window, width=event.width))
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        selections = []
+        for index, segment in enumerate(segments, start=1):
+            selected = self.tk.BooleanVar(value=True)
+            selections.append(selected)
+            item = self.ttk.Frame(list_frame, padding=(8, 7))
+            item.pack(fill="x")
+            self.ttk.Checkbutton(
+                item,
+                text=f"Änderung {index} übernehmen",
+                variable=selected,
+            ).pack(anchor="w")
+            before = self._change_excerpt(segment.before, empty="[wird eingefügt]")
+            after = self._change_excerpt(segment.after, empty="[wird entfernt]")
+            self.ttk.Label(item, text=f"Vorher: {before}", wraplength=720, foreground="#7a1111").pack(
+                anchor="w", padx=(24, 0)
+            )
+            self.ttk.Label(item, text=f"Nachher: {after}", wraplength=720, foreground="#176b36").pack(
+                anchor="w", padx=(24, 0)
+            )
+
+        actions = self.ttk.Frame(outer)
+        actions.pack(fill="x")
+        self.ttk.Button(actions, text="Abbrechen", command=window.destroy).pack(side="right")
+        self.ttk.Button(
+            actions,
+            text="Auswahl sicher übernehmen",
+            command=lambda: self._apply_individual_changes(
+                source,
+                segments,
+                tuple(bool(value.get()) for value in selections),
+                window,
+            ),
+            style="Primary.TButton",
+        ).pack(side="right", padx=(0, 8))
+        window.focus_set()
+
+    def _apply_individual_changes(
+        self,
+        source: str,
+        segments: tuple[ChangeSegment, ...],
+        selected: tuple[bool, ...],
+        window: object,
+    ) -> None:
+        if self.last_audit is None:
+            return
+        candidate = apply_change_selection(source, segments, selected)
+        options = self.last_audit.options
+        warnings = validate_preservation(
+            source,
+            candidate,
+            self.last_audit.semantic_constraints,
+            preserve_numbers=bool(options.get("preserve_numbers", True)),
+            preserve_citations=bool(options.get("preserve_citations", True)),
+            preserve_quotations=bool(options.get("preserve_quotations", True)),
+        )
+        if warnings:
+            summary = build_review_summary(self.last_audit.semantic_constraints, warnings)
+            details = "\n".join(f"• {notice}" for notice in summary.notices[:5])
+            self.messagebox.showwarning(
+                "Auswahl nicht übernommen",
+                f"{summary.message}\n\n{details}\n\nBitte ändere die Auswahl oder verwende Original/Verbesserung vollständig.",
+                parent=window,
+            )
+            return
+        self.output_text.delete("1.0", "end")
+        self.output_text.insert("1.0", candidate)
+        self.copy_button.configure(state="normal")
+        self.result_status.configure(text="Geprüfte Einzelauswahl übernommen – bereit zum Kopieren.")
+        window.destroy()
 
     def _use_reviewed_text(self, text: str, window: object, *, improved: bool) -> None:
         self.output_text.delete("1.0", "end")

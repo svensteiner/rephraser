@@ -17,6 +17,10 @@ lokal und typischerweise in deutlich unter einer Sekunde. Wirkungslose Optionen 
 nicht angeboten. Nach der Bearbeitung öffnet **Änderungen ansehen** eine optionale
 Gegenüberstellung: Rot markiert die frühere, Grün die neue Formulierung. Dort kann mit
 einem Klick das Original oder die Verbesserung als kopierbare Fassung ausgewählt werden.
+Bei bis zu 100 Änderungsbereichen ermöglicht **Änderungen einzeln auswählen** eine
+Mischfassung. Jede Kombination wird vor der Übernahme erneut auf geschützte Zahlen,
+Daten, Namen, Quellen, Zitate, Verneinungen, Unsicherheiten und Markdown-Struktur
+geprüft. Eine auffällige Auswahl wird nicht still übernommen.
 Eine verständliche Inhaltsprüfung nennt den tatsächlich geprüften Umfang und zeigt klar,
 ob keine überwachte Abweichung gefunden, eine unsichere Fassung automatisch verworfen
 oder eine Stelle manuell zu kontrollieren ist. Sie weist ausdrücklich darauf hin, dass

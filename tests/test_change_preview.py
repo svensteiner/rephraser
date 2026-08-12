@@ -1,4 +1,6 @@
-from app.change_preview import build_change_preview
+import pytest
+
+from app.change_preview import apply_change_selection, build_change_preview, build_change_segments
 
 
 def _highlighted(text: str, ranges: tuple[tuple[int, int], ...]) -> str:
@@ -40,3 +42,39 @@ def test_change_preview_is_stable_for_long_repetitive_documents() -> None:
     assert preview.change_groups == 1
     assert _highlighted(original, preview.original_ranges) == "Alte"
     assert _highlighted(rewritten, preview.rewritten_ranges) == "Klare"
+
+
+def test_each_change_can_be_selected_independently_without_losing_separators() -> None:
+    original = "Wir möchten gerne prüfen. Zum jetzigen Zeitpunkt fehlt Beleg 17."
+    rewritten = "Wir möchten prüfen. Derzeit fehlt Beleg 17."
+    segments = build_change_segments(original, rewritten)
+
+    assert len(segments) == 2
+    assert apply_change_selection(original, segments, (False, False)) == original
+    assert apply_change_selection(original, segments, (True, True)) == rewritten
+    assert apply_change_selection(original, segments, (True, False)) == (
+        "Wir möchten prüfen. Zum jetzigen Zeitpunkt fehlt Beleg 17."
+    )
+    assert apply_change_selection(original, segments, (False, True)) == (
+        "Wir möchten gerne prüfen. Derzeit fehlt Beleg 17."
+    )
+
+
+def test_selection_preserves_markdown_unicode_and_insertions_exactly() -> None:
+    original = "# Grüße 👩‍💻\n\n- Wert: 12,5 %"
+    rewritten = "# Klare Grüße 👩‍💻\n\n- Wert: 12,5 % ✅"
+    segments = build_change_segments(original, rewritten)
+
+    assert apply_change_selection(original, segments, (True, False)) == (
+        "# Klare Grüße 👩‍💻\n\n- Wert: 12,5 %"
+    )
+    assert apply_change_selection(original, segments, (False, True)) == (
+        "# Grüße 👩‍💻\n\n- Wert: 12,5 % ✅"
+    )
+
+
+def test_invalid_selection_or_overlapping_segments_is_rejected() -> None:
+    original = "Alt."
+    segments = build_change_segments(original, "Neu.")
+    with pytest.raises(ValueError, match="Selection count"):
+        apply_change_selection(original, segments, ())
