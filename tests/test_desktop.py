@@ -6,6 +6,7 @@ from app.desktop import (
     local_mistral_ready,
     primary_action_label,
     processing_settings,
+    request_is_current,
     result_is_current,
     run_self_test,
 )
@@ -53,3 +54,49 @@ def test_result_actions_require_current_non_busy_output() -> None:
     assert result_is_current("source", "source", "result", True) is False
     assert result_is_current("source", None, "result", False) is False
     assert result_is_current("source", "source", "", False) is False
+
+
+def test_late_worker_results_are_rejected_after_fallback_or_close() -> None:
+    assert request_is_current(4, 4) is True
+    assert request_is_current(3, 4) is False
+    assert request_is_current(4, 4, closed=True) is False
+
+
+def test_safe_result_action_invalidates_slow_model_and_starts_fast_editor(monkeypatch) -> None:
+    from app.desktop import DesktopApp
+
+    configured: list[dict[str, object]] = []
+    started_with: list[tuple[object, ...]] = []
+
+    class Widget:
+        def configure(self, **values):
+            configured.append(values)
+
+    class Input:
+        def get(self, start, end):
+            return "Ein unveränderter Text."
+
+    class ImmediateThread:
+        def __init__(self, *, target, args, **kwargs):
+            started_with.append(args)
+
+        def start(self):
+            return None
+
+    app = DesktopApp.__new__(DesktopApp)
+    app.busy = True
+    app.processing_active = True
+    app.active_request_id = 7
+    app.mistral_ready = True
+    app.input_text = Input()
+    app.run_button = Widget()
+    app.result_status = Widget()
+    app._worker = object()
+    monkeypatch.setattr("app.desktop.threading.Thread", ImmediateThread)
+
+    app.use_safe_result_now()
+
+    assert app.active_request_id == 8
+    assert app.processing_active is False
+    assert started_with == [("Ein unveränderter Text.", "fast-editor", "medium", 8)]
+    assert any(item.get("text") == "Sichere lokale Fassung wird sofort erstellt …" for item in configured)

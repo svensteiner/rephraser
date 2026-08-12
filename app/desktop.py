@@ -48,6 +48,11 @@ def result_is_current(source: str, processed_source: str | None, result: str, bu
     return result_actions_allowed(state)
 
 
+def request_is_current(request_id: int, active_request_id: int, closed: bool = False) -> bool:
+    """Reject late worker results after fallback, restart, or window close."""
+    return not closed and request_id == active_request_id
+
+
 def run_self_test() -> dict[str, object]:
     """Run a dependency-free functional check suitable for packaged builds."""
     source = "Grüße\u00a0aus Wien – 12,5 % am 3. März 2026."
@@ -86,6 +91,9 @@ class DesktopApp:
         self.busy = False
         self.processing_active = False
         self.processing_started = 0.0
+        self.active_request_id = 0
+        self.closed = False
+        self.root.protocol("WM_DELETE_WINDOW", self._close)
 
         style = ttk.Style(self.root)
         style.theme_use("vista" if "vista" in style.theme_names() else style.theme_use())
@@ -241,6 +249,8 @@ class DesktopApp:
 
     def start_processing(self) -> None:
         if self.busy:
+            if self.processing_active:
+                self.use_safe_result_now()
             return
         source = self.input_text.get("1.0", "end-1c")
         if not source.strip():
@@ -253,7 +263,7 @@ class DesktopApp:
                 f"Bitte höchstens {MAX_CHARACTERS:,} Zeichen verwenden.".replace(",", "."),
             )
             return
-        self.run_button.configure(state="disabled")
+        self.run_button.configure(state="disabled", text=primary_action_label(self.mistral_ready))
         self.busy = True
         self.copy_button.configure(state="disabled")
         self.input_text.configure(state="disabled")
@@ -263,10 +273,35 @@ class DesktopApp:
         self.processing_active = "mistral" in provider
         if self.processing_active:
             self.processing_started = time.monotonic()
+            self.run_button.configure(state="normal", text="Sichere Fassung jetzt")
             self._update_elapsed_time()
         else:
             self.result_status.configure(text="Text wird sofort lokal verbessert …")
-        thread = threading.Thread(target=self._worker, args=(source, provider, strength), daemon=True)
+        self.active_request_id += 1
+        request_id = self.active_request_id
+        thread = threading.Thread(
+            target=self._worker,
+            args=(source, provider, strength, request_id),
+            daemon=True,
+        )
+        thread.start()
+
+    def use_safe_result_now(self) -> None:
+        """Abandon a slow model result and immediately produce the local fast version."""
+        if not self.busy or not self.processing_active:
+            return
+        source = self.input_text.get("1.0", "end-1c")
+        self.active_request_id += 1
+        request_id = self.active_request_id
+        self.processing_active = False
+        self.run_button.configure(state="disabled", text=primary_action_label(self.mistral_ready))
+        self.result_status.configure(text="Sichere lokale Fassung wird sofort erstellt …")
+        thread = threading.Thread(
+            target=self._worker,
+            args=(source, "fast-editor", "medium", request_id),
+            daemon=True,
+            name="safe-editor-fallback",
+        )
         thread.start()
 
     def _update_elapsed_time(self) -> None:
@@ -278,7 +313,7 @@ class DesktopApp:
         )
         self.root.after(1000, self._update_elapsed_time)
 
-    def _worker(self, source: str, provider: str, strength: str) -> None:
+    def _worker(self, source: str, provider: str, strength: str, request_id: int) -> None:
         try:
             options = TransformOptions(
                 provider=provider,
@@ -290,15 +325,26 @@ class DesktopApp:
             )
             result = run_pipeline(source, options)
         except Exception as error:  # UI boundary: always return control to the user.
-            self.root.after(0, self._show_error, error)
+            self._schedule_ui(self._show_error, error, request_id)
             return
-        self.root.after(0, self._show_result, result, provider)
+        self._schedule_ui(self._show_result, result, provider, request_id)
 
-    def _show_result(self, result: object, provider: str) -> None:
+    def _schedule_ui(self, callback: object, *args: object) -> None:
+        """Deliver worker results only while the Tk window still exists."""
+        if self.closed:
+            return
+        try:
+            self.root.after(0, callback, *args)
+        except self.tk.TclError:
+            return
+
+    def _show_result(self, result: object, provider: str, request_id: int) -> None:
+        if not request_is_current(request_id, self.active_request_id, self.closed):
+            return
         self.busy = False
         self.processing_active = False
         self.progress.stop()
-        self.run_button.configure(state="normal")
+        self.run_button.configure(state="normal", text=primary_action_label(self.mistral_ready))
         self.input_text.configure(state="normal")
         self.mode_box.configure(state="readonly")
         rewritten = result.rewritten_text
@@ -334,11 +380,13 @@ class DesktopApp:
             message = "Fertig – Formatierungsartefakte bereinigt; der Text wurde nicht sprachlich umformuliert."
         self.result_status.configure(text=message)
 
-    def _show_error(self, error: Exception) -> None:
+    def _show_error(self, error: Exception, request_id: int) -> None:
+        if not request_is_current(request_id, self.active_request_id, self.closed):
+            return
         self.busy = False
         self.processing_active = False
         self.progress.stop()
-        self.run_button.configure(state="normal")
+        self.run_button.configure(state="normal", text=primary_action_label(self.mistral_ready))
         self.input_text.configure(state="normal")
         self.mode_box.configure(state="readonly")
         source = self.input_text.get("1.0", "end-1c")
@@ -355,6 +403,13 @@ class DesktopApp:
             message += " Das letzte gültige Ergebnis bleibt verfügbar."
         self.result_status.configure(text=message)
         self.messagebox.showerror("Bearbeitung nicht möglich", f"{message}\n\nTechnische Information: {error}")
+
+    def _close(self) -> None:
+        """Invalidate pending callbacks before closing the native window."""
+        self.closed = True
+        self.active_request_id += 1
+        self.processing_active = False
+        self.root.destroy()
 
     def copy_result(self) -> None:
         source = self.input_text.get("1.0", "end-1c")

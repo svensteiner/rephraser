@@ -1,4 +1,5 @@
 import json
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import threading
 import time
 
@@ -122,6 +123,61 @@ def test_mistral_enforces_wall_clock_deadline_and_closes_slow_response(monkeypat
     assert captured_error.value.code == "provider_timeout"
     assert time.monotonic() - started < 0.5
     assert closed.wait(0.5)
+
+
+def test_mistral_deadline_covers_connection_or_header_stall(monkeypatch) -> None:
+    class BlockingOpener:
+        def open(self, request, timeout):
+            time.sleep(1)
+
+    monkeypatch.setattr("urllib.request.build_opener", lambda *handlers: BlockingOpener())
+    provider = LocalMistralProvider()
+    provider.timeout = 0.05
+    started = time.monotonic()
+
+    with pytest.raises(ProviderError) as captured_error:
+        provider.rewrite("Ein Satz.", extract_semantics("Ein Satz."), TransformOptions())
+
+    assert captured_error.value.code == "provider_timeout"
+    assert time.monotonic() - started < 0.5
+
+
+def test_mistral_deadline_stops_a_real_slow_drip_response() -> None:
+    class SlowDripHandler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            payload = b'{"response":"Eine langsame Antwort."}'
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            try:
+                for byte in payload:
+                    self.wfile.write(bytes([byte]))
+                    self.wfile.flush()
+                    time.sleep(0.03)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+
+        def log_message(self, format, *args):
+            return None
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), SlowDripHandler)
+    server.daemon_threads = True
+    serving = threading.Thread(target=server.serve_forever, daemon=True)
+    serving.start()
+    provider = LocalMistralProvider(base_url=f"http://127.0.0.1:{server.server_port}")
+    provider.timeout = 0.12
+    started = time.monotonic()
+    try:
+        with pytest.raises(ProviderError) as captured_error:
+            provider.rewrite("Ein Satz.", extract_semantics("Ein Satz."), TransformOptions())
+        deadline_elapsed = time.monotonic() - started
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    assert captured_error.value.code == "provider_timeout"
+    assert deadline_elapsed < 0.6
 
 
 def test_mistral_reports_oversized_input_before_any_network_call(monkeypatch) -> None:

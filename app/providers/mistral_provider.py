@@ -58,10 +58,19 @@ class LocalMistralProvider(EditorialProvider):
         if worker.is_alive():
             response = active_response.get("value")
             if response is not None:
-                try:
-                    response.close()
-                except Exception:
-                    pass
+                def close_response() -> None:
+                    try:
+                        response.close()  # type: ignore[union-attr]
+                    except Exception:
+                        pass
+
+                # Some HTTPResponse implementations block in close() while another
+                # thread is reading. Cleanup must never extend the user-facing deadline.
+                threading.Thread(
+                    target=close_response,
+                    daemon=True,
+                    name="local-mistral-response-cleanup",
+                ).start()
             raise ProviderError(
                 f"Local Mistral exceeded the {self.timeout:g}-second total deadline; "
                 "no cloud fallback was attempted.",
