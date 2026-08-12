@@ -122,6 +122,7 @@ def test_safe_result_action_invalidates_slow_model_and_starts_fast_editor(monkey
     app.input_text = Input()
     app.run_button = Widget()
     app.result_status = Widget()
+    app.protected_terms = ()
     app._worker = object()
     monkeypatch.setattr("app.desktop.threading.Thread", ImmediateThread)
 
@@ -129,7 +130,7 @@ def test_safe_result_action_invalidates_slow_model_and_starts_fast_editor(monkey
 
     assert app.active_request_id == 8
     assert app.processing_active is False
-    assert started_with == [("Ein unveränderter Text.", "fast-editor", "medium", 8)]
+    assert started_with == [("Ein unveränderter Text.", "fast-editor", "medium", 8, ())]
     assert any(item.get("text") == "Sichere lokale Fassung wird sofort erstellt …" for item in configured)
 
 

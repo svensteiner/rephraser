@@ -13,7 +13,7 @@ from .models import TransformRequest, TransformResult
 from .pipeline import run_pipeline
 from .providers.base import ProviderError
 
-app = FastAPI(title="Editorial Transformer", version="1.9.0",
+app = FastAPI(title="Editorial Transformer", version="1.10.0",
     description="Local-first editorial rewriting and semantic-preservation auditing. No AI detector score.")
 
 
@@ -45,6 +45,13 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--strength", choices=["light", "medium", "substantial"], default="medium")
     parser.add_argument("--language", choices=["German", "English", "auto-detect"], default="auto-detect")
     parser.add_argument("--author-style", default="")
+    parser.add_argument(
+        "--protect",
+        action="append",
+        default=[],
+        metavar="TERM",
+        help="exact term to preserve; may be supplied more than once",
+    )
     return parser
 
 
@@ -64,11 +71,11 @@ def cli(argv: list[str] | None = None) -> int:
     if len(text) > 2_000_000:
         print("error: input exceeds 2,000,000 characters", file=sys.stderr)
         return 2
-    options = TransformOptions(provider=args.provider, tone=args.tone, rewrite_strength=args.strength,
-        language=args.language, custom_author_style=args.author_style)
     try:
+        options = TransformOptions(provider=args.provider, tone=args.tone, rewrite_strength=args.strength,
+            language=args.language, custom_author_style=args.author_style, protected_terms=args.protect)
         result = run_pipeline(text, options)
-    except ProviderError as error:
+    except (ProviderError, ValueError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 2
     if args.output:

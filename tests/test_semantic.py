@@ -62,3 +62,12 @@ def test_expanded_uncertainty_language_is_not_treated_as_certain_claim() -> None
     result = extract_semantics(text)
     assert len(result.uncertainties) == 2
     assert result.core_claims == ["Der Umsatz ist bestätigt."]
+
+
+def test_explicit_protected_terms_are_added_only_when_present_exactly() -> None:
+    result = extract_semantics(
+        "Project Aurora nutzt die Kontenabstimmung.",
+        ["Project Aurora", "project aurora", "Kontenabstimmung"],
+    )
+    assert result.protected_terms == ["Project Aurora", "Kontenabstimmung"]
+    assert all(term in result.must_preserve for term in result.protected_terms)

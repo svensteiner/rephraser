@@ -4,6 +4,7 @@ import re
 import unicodedata
 
 from app.models import RewriteStrength, SemanticConstraints, TransformOptions
+from app.protection import transform_outside_protected_terms
 from app.providers.base import EditorialProvider
 
 
@@ -28,15 +29,17 @@ class LocalRuleProvider(EditorialProvider):
     name = "rules"
 
     def rewrite(self, text: str, constraints: SemanticConstraints, options: TransformOptions) -> str:
-        result = text.replace("\r\n", "\n").replace("\r", "\n")
-        result = unicodedata.normalize("NFC", result)
-        # A BOM is only unambiguous at the beginning of a document. Mid-text
-        # U+FEFF is retained and surfaced by inspection instead of being
-        # silently deleted as an unknown copy/paste pattern.
+        def clean_fragment(fragment: str) -> str:
+            cleaned = fragment.replace("\r\n", "\n").replace("\r", "\n")
+            cleaned = unicodedata.normalize("NFC", cleaned)
+            cleaned = cleaned.replace("\u200b", "").replace("\u00ad", "")
+            return cleaned.replace("\u00a0", " ").replace("\u202f", " ")
+
+        result = transform_outside_protected_terms(text, constraints.protected_terms, clean_fragment)
+        # A BOM is only unambiguous at the beginning of a document. Explicit
+        # terms cannot contain format controls, so a leading BOM is never protected.
         if result.startswith("\ufeff"):
             result = result[1:]
-        result = result.replace("\u200b", "").replace("\u00ad", "")
-        result = result.replace("\u00a0", " ").replace("\u202f", " ")
         # Markdown hard breaks (two trailing spaces) and code whitespace are preserved.
         if options.rewrite_strength == RewriteStrength.SUBSTANTIAL:
             result = _collapse_blank_lines_outside_fences(result)

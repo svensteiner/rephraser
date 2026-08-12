@@ -14,12 +14,13 @@ from .providers.fast_editor import FastEditorialProvider
 from .providers.local import LocalRuleProvider
 from .providers.mistral_provider import LocalMistralProvider
 from .providers.hybrid import HybridLocalProvider
+from .protection import missing_protected_terms
 from .repair import repair_protected_formatting
 from .rewrite import rewrite_text
 from .semantic import extract_semantics
 from .validation import validate_preservation
 
-PIPELINE_VERSION = "1.9.0"
+PIPELINE_VERSION = "1.10.0"
 
 
 def _code_points(value: str) -> list[str]:
@@ -64,7 +65,7 @@ def run_pipeline(text: str, options: TransformOptions | None = None,
                  provider: EditorialProvider | None = None) -> TransformResult:
     selected = options or TransformOptions()
     inspection = inspect_text(text)
-    semantics = extract_semantics(text)
+    semantics = extract_semantics(text, selected.protected_terms)
     before_metrics = calculate_metrics(text)
     active_provider = provider or get_provider(selected.provider)
     requested_provider = active_provider.name
@@ -141,6 +142,13 @@ def run_pipeline(text: str, options: TransformOptions | None = None,
             value=", ".join(rejection_kinds),
             message=(f"Die sprachliche {rejected_source} wurde wegen möglicher inhaltlicher Änderungen "
                      "verworfen. Ausgegeben wurde nur die sichere Grundbereinigung."),
+        ))
+    for missing_term in missing_protected_terms(text, selected.protected_terms):
+        warnings.append(ValidationWarning(
+            kind="protected_term_not_found",
+            severity="medium",
+            value=missing_term,
+            message="Der gewünschte geschützte Begriff kommt im Ausgangstext nicht exakt vor.",
         ))
     transformations = []
     matcher = difflib.SequenceMatcher(None, text, rewritten)

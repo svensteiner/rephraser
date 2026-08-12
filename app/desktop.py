@@ -16,6 +16,7 @@ from app.diagnostics import diagnostic_log_path, write_diagnostic_event
 from app.models import AuditReport, TransformOptions, ValidationWarning
 from app.pipeline import run_pipeline
 from app.providers.base import ProviderError
+from app.protection import missing_protected_terms, normalize_protected_terms
 from app.review_summary import build_review_summary
 from app.support import build_support_info
 from app.ui_preferences import UiPreferences, load_ui_preferences, save_ui_preferences
@@ -104,6 +105,7 @@ class DesktopApp:
         self.messagebox = messagebox
         self.root = tk.Tk()
         self.ui_preferences = load_ui_preferences()
+        self.protected_terms: tuple[str, ...] = ()
         self.root.title("Text verbessern")
         self.root.geometry("940x760")
         self.root.minsize(760, 620)
@@ -234,18 +236,27 @@ class DesktopApp:
             text=f"Text einfügen und auf „{primary_action_label(self.mistral_ready)}“ klicken.",
             style="Hint.TLabel",
         )
-        self.result_status.pack(side="left")
         self.help_button = ttk.Button(
             self.bottom,
             text="Info & Hilfe",
             command=self.open_help,
             style="Secondary.TButton",
         )
-        self.help_button.pack(side="left", padx=(12, 0))
-        ttk.Button(self.bottom, text="Leeren", command=self.clear_all, style="Secondary.TButton").pack(side="right")
+        self.protected_terms_button = ttk.Button(
+            self.bottom,
+            text="Begriffe schützen …",
+            command=self.open_protected_terms,
+            style="Secondary.TButton",
+        )
         ttk.Button(self.bottom, text="Speichern", command=self.save_result, style="Secondary.TButton").pack(
+            side="right"
+        )
+        ttk.Button(self.bottom, text="Leeren", command=self.clear_all, style="Secondary.TButton").pack(
             side="right", padx=(0, 8)
         )
+        self.help_button.pack(side="left")
+        self.protected_terms_button.pack(side="left", padx=(8, 0))
+        self.result_status.pack(side="left", fill="x", expand=True, padx=(10, 8))
         ttk.Label(
             outer,
             text="Tastatur: Strg+Enter verbessern · Strg+E bearbeiten/prüfen · F1 Hilfe",
@@ -366,6 +377,77 @@ class DesktopApp:
 
         self.root.bind(sequence, invoke)
 
+    def _update_protected_terms_button(self) -> None:
+        count = len(self.protected_terms)
+        label = f"Geschützte Begriffe ({count}) …" if count else "Begriffe schützen …"
+        self.protected_terms_button.configure(text=label)
+
+    def open_protected_terms(self) -> None:
+        """Open a focused optional dialog for exact terminology protection."""
+        source = self.input_text.get("1.0", "end-1c")
+        if not source.strip():
+            self.messagebox.showinfo("Text fehlt", "Bitte zuerst den zu bearbeitenden Text einfügen.")
+            self.input_text.focus_set()
+            return
+        window = self.tk.Toplevel(self.root)
+        window.title("Begriffe schützen")
+        window.geometry("620x430")
+        window.minsize(520, 360)
+        window.transient(self.root)
+        outer = self.ttk.Frame(window, padding=20)
+        outer.pack(fill="both", expand=True)
+        self.ttk.Label(outer, text="Welche Begriffe dürfen sich nicht ändern?", font=self.dialog_title_font).pack(
+            anchor="w"
+        )
+        self.ttk.Label(
+            outer,
+            text=(
+                "Optional: einen Fachbegriff oder eine feste Bezeichnung pro Zeile eintragen. "
+                "Groß-/Kleinschreibung und Anzahl bleiben exakt erhalten."
+            ),
+            wraplength=570,
+        ).pack(anchor="w", pady=(4, 10))
+        editor = self.scrolledtext.ScrolledText(outer, height=10, wrap="word", font=self.body_font, undo=True)
+        editor.insert("1.0", "\n".join(self.protected_terms))
+        editor.pack(fill="both", expand=True)
+        self.ttk.Label(
+            outer,
+            text="Beispiele: UniCredit BulBank · Kontenabstimmung · Project Aurora",
+            style="Hint.TLabel",
+        ).pack(anchor="w", pady=(6, 10))
+
+        def apply_terms() -> None:
+            try:
+                terms = normalize_protected_terms(editor.get("1.0", "end-1c").splitlines())
+            except ValueError as error:
+                self.messagebox.showerror("Begriffe prüfen", str(error), parent=window)
+                return
+            missing = missing_protected_terms(source, terms)
+            if missing:
+                preview = "\n".join(f"• {term}" for term in missing[:5])
+                self.messagebox.showerror(
+                    "Nicht im Text gefunden",
+                    "Diese Begriffe kommen im Ausgangstext nicht exakt vor:\n\n" + preview,
+                    parent=window,
+                )
+                return
+            self.protected_terms = tuple(terms)
+            self._update_protected_terms_button()
+            self.result_status.configure(
+                text=(f"{len(terms)} Begriff(e) werden exakt geschützt."
+                      if terms else "Kein zusätzlicher Begriffsschutz aktiv.")
+            )
+            window.destroy()
+
+        actions = self.ttk.Frame(outer)
+        actions.pack(fill="x")
+        self.ttk.Button(actions, text="Abbrechen", command=window.destroy).pack(side="right")
+        self.ttk.Button(
+            actions, text="Schutz übernehmen", command=apply_terms, style="Primary.TButton"
+        ).pack(side="right", padx=(0, 8))
+        self._apply_text_palette(window)
+        editor.focus_set()
+
     def _set_source_text(self, content: str) -> None:
         if len(content) > MAX_CHARACTERS:
             self.messagebox.showerror(
@@ -442,12 +524,23 @@ class DesktopApp:
                 f"Bitte höchstens {MAX_CHARACTERS:,} Zeichen verwenden.".replace(",", "."),
             )
             return
+        missing_terms = missing_protected_terms(source, self.protected_terms)
+        if missing_terms:
+            self.messagebox.showerror(
+                "Geschützten Begriff prüfen",
+                "Mindestens ein geschützter Begriff kommt im aktuellen Text nicht mehr exakt vor:\n\n"
+                + "\n".join(f"• {term}" for term in missing_terms[:5])
+                + "\n\nBitte den Begriffsschutz anpassen.",
+            )
+            self.open_protected_terms()
+            return
         self.run_button.configure(state="disabled", text=primary_action_label(self.mistral_ready))
         self.busy = True
         self.manual_result_verified = False
         self.copy_button.configure(state="disabled")
         self.input_text.configure(state="disabled")
         self.mode_box.configure(state="disabled")
+        self.protected_terms_button.configure(state="disabled")
         provider, strength = processing_settings(self.mode.get(), self.mistral_ready)
         self.progress.start(12)
         self.processing_active = "mistral" in provider
@@ -461,7 +554,7 @@ class DesktopApp:
         request_id = self.active_request_id
         thread = threading.Thread(
             target=self._worker,
-            args=(source, provider, strength, request_id),
+            args=(source, provider, strength, request_id, self.protected_terms),
             daemon=True,
         )
         thread.start()
@@ -478,7 +571,7 @@ class DesktopApp:
         self.result_status.configure(text="Sichere lokale Fassung wird sofort erstellt …")
         thread = threading.Thread(
             target=self._worker,
-            args=(source, "fast-editor", "medium", request_id),
+            args=(source, "fast-editor", "medium", request_id, self.protected_terms),
             daemon=True,
             name="safe-editor-fallback",
         )
@@ -493,7 +586,14 @@ class DesktopApp:
         )
         self.root.after(1000, self._update_elapsed_time)
 
-    def _worker(self, source: str, provider: str, strength: str, request_id: int) -> None:
+    def _worker(
+        self,
+        source: str,
+        provider: str,
+        strength: str,
+        request_id: int,
+        protected_terms: tuple[str, ...] = (),
+    ) -> None:
         try:
             options = TransformOptions(
                 provider=provider,
@@ -502,6 +602,7 @@ class DesktopApp:
                 preserve_citations=True,
                 preserve_numbers=True,
                 preserve_quotations=True,
+                protected_terms=list(protected_terms),
             )
             result = run_pipeline(source, options)
         except Exception as error:  # UI boundary: always return control to the user.
@@ -536,6 +637,7 @@ class DesktopApp:
         self.run_button.configure(state="normal", text=primary_action_label(self.mistral_ready))
         self.input_text.configure(state="normal")
         self.mode_box.configure(state="readonly")
+        self.protected_terms_button.configure(state="normal")
         rewritten = result.rewritten_text
         source = self.input_text.get("1.0", "end-1c")
         changed = rewritten != source
@@ -677,6 +779,7 @@ class DesktopApp:
         self.run_button.configure(state="normal", text=primary_action_label(self.mistral_ready))
         self.input_text.configure(state="normal")
         self.mode_box.configure(state="readonly")
+        self.protected_terms_button.configure(state="normal")
         source = self.input_text.get("1.0", "end-1c")
         previous = self.output_text.get("1.0", "end-1c")
         previous_available = result_is_current(source, self.processed_source, previous, False)
@@ -1078,6 +1181,8 @@ class DesktopApp:
         self.last_audit = None
         self.manual_result_verified = False
         self.verified_result_before_edit = ""
+        self.protected_terms = ()
+        self._update_protected_terms_button()
         if self.result_visible:
             self.result_line.pack_forget()
             self.output_text.pack_forget()

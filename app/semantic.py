@@ -4,6 +4,7 @@ import re
 
 from .inspection import split_sentences
 from .models import SemanticConstraints
+from .protection import normalize_protected_terms
 
 URL = r"https?://[^\s<>\])}\"”’»]+"
 NUMBER = r"(?<![\w\d])(?:(?:EUR|USD|CHF|€)\s*)?[-+]?(?:\d{1,3}(?:[. ,]\d{3})+|\d+)(?:[,.]\d+)?\s*(?:(?:Mio\.|Mrd\.)\s*)?(?:%|EUR|USD|CHF|€|BTC|ETH|USDT)?(?![\w\d])"
@@ -48,7 +49,7 @@ def _extract_names(text: str) -> list[str]:
     return _unique(candidates)
 
 
-def extract_semantics(text: str) -> SemanticConstraints:
+def extract_semantics(text: str, protected_terms: list[str] | tuple[str, ...] = ()) -> SemanticConstraints:
     sentences = split_sentences(text)
     citations = _unique([item.rstrip(".,;:") for item in re.findall(URL, text)])
     quotes = _unique(re.findall(QUOTE, text))
@@ -65,7 +66,8 @@ def extract_semantics(text: str) -> SemanticConstraints:
     claims = [s for s in sentences if s not in uncertain]
     structure = [re.sub(r"^#{1,6}\s*", "", line).strip() for line in text.splitlines()
                  if re.match(r"^#{1,6}\s+", line)] or [f"Paragraph {i + 1}" for i, p in enumerate(re.split(r"\n\s*\n", text)) if p.strip()]
-    must = _unique(numbers + dates + quotes + citations + names)
+    explicit_terms = [term for term in normalize_protected_terms(protected_terms) if term in text]
+    must = _unique(numbers + dates + quotes + citations + names + explicit_terms)
     return SemanticConstraints(core_claims=claims, facts=facts, numbers=numbers, names=names,
         dates=dates, quotations=quotes, citations=citations, argument_structure=structure,
-        uncertainties=uncertain, must_preserve=must)
+        uncertainties=uncertain, protected_terms=explicit_terms, must_preserve=must)

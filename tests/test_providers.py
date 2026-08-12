@@ -93,6 +93,32 @@ def test_mistral_exact_value_options_control_the_mandatory_prompt(monkeypatch) -
     assert json.loads(mandatory_json) == ["Anna Müller"]
 
 
+def test_mistral_prompt_includes_explicit_protected_terms(monkeypatch) -> None:
+    captured = {}
+    text = "Project Aurora bleibt unverändert."
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def read(self, limit):
+            return json.dumps({"response": text}).encode("utf-8")
+
+    class Opener:
+        def open(self, request, timeout):
+            captured.update(json.loads(request.data))
+            return Response()
+
+    monkeypatch.setattr("urllib.request.build_opener", lambda *handlers: Opener())
+    options = TransformOptions(protected_terms=["Project Aurora"])
+    LocalMistralProvider().rewrite(text, extract_semantics(text, options.protected_terms), options)
+    mandatory_json = captured["prompt"].split("Mandatory exact strings: ", 1)[1].splitlines()[0]
+    assert "Project Aurora" in json.loads(mandatory_json)
+
+
 def test_mistral_enforces_wall_clock_deadline_and_closes_slow_response(monkeypatch) -> None:
     closed = threading.Event()
 

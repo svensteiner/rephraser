@@ -9,12 +9,13 @@ def test_curated_quality_corpus_is_complete_and_green() -> None:
     assert report.ok, {
         result.id: result.failures for result in report.results if not result.passed
     }
-    assert report.total >= 14
+    assert report.total >= 15
     assert report.language_counts["de"] >= 8
     assert report.language_counts["en"] >= 5
     assert report.category_counts["business-email"] >= 1
     assert report.category_counts["negative-control"] >= 1
     assert report.category_counts["unicode"] >= 2
+    assert report.category_counts["terminology-protection"] >= 1
 
 
 def test_evaluator_reports_output_preservation_warning_and_provider_failures(monkeypatch) -> None:
@@ -60,3 +61,4 @@ def test_corpus_ids_are_unique_and_required_values_exist_in_source() -> None:
         assert case.input
         assert case.expected_output
         assert all(value in case.input for value in case.must_preserve)
+        assert all(value in case.input for value in case.protected_terms)

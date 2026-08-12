@@ -37,6 +37,10 @@ oder eine Stelle manuell zu kontrollieren ist. Sie weist ausdrücklich darauf hi
 wichtige Texte weiterhin selbst gelesen werden sollten.
 Während einer gründlichen Mistral-Bearbeitung liefert **Sichere Fassung jetzt** ohne
 weiteres Warten die lokale Schnellbearbeitung.
+Über **Begriffe schützen …** können optional interne Projekt-, Produkt- oder Kontonamen
+eingetragen werden – ein Begriff pro Zeile. Die App akzeptiert nur Begriffe, die im
+Ausgangstext exakt vorkommen, erhält Schreibweise und Häufigkeit und prüft den Schutz
+erneut nach Modellbearbeitung, manueller Bearbeitung und individueller Änderungsauswahl.
 
 **Info & Hilfe** zeigt die installierte Version und den lokalen Modellstatus. Für den
 Support lassen sich datenschutzarme Diagnoseinformationen kopieren. Sie enthalten nur
@@ -48,8 +52,8 @@ ohne Administratorrechte lokal unter `%LOCALAPPDATA%` gespeichert. Die Einstellu
 enthält keinerlei Text- oder Dokumentdaten.
 
 Die Browser-Oberfläche zeigt nach der Bearbeitung **Original und Ergebnis nebeneinander**.
-Unter **Bearbeitung anpassen** lassen sich Sprache sowie der exakte Schutz von Zahlen
-und Daten, Quellen und Links sowie wörtlichen Zitaten einstellen. Eigennamen und
+Unter **Bearbeitung anpassen** lassen sich Sprache sowie der exakte Schutz von Zahlen,
+Daten, Quellen, Links, wörtlichen Zitaten und eigenen Fachbegriffen einstellen. Eigennamen und
 Tatsachenbehauptungen werden immer geprüft. Der Bereich **Änderungen und Prüfung**
 enthält Diff, Unicode-Befunde und die Qualitätskennzahlen vor und nach der Bearbeitung.
 Die lokale Modellbearbeitung ist auf 45 Sekunden begrenzt. Antwortet Mistral nicht
@@ -134,6 +138,7 @@ CLI, fully offline:
 ```powershell
 editorial-transformer examples\sample.md -o edited.md --provider fast-editor
 Get-Content input.txt -Raw | editorial-transformer --stdin --provider fast-editor
+editorial-transformer input.txt -o edited.txt --protect "Project Aurora" --protect "Kontenabstimmung"
 ```
 
 Local Mistral through Ollama:

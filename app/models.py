@@ -4,7 +4,9 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from app.protection import normalize_protected_terms
 
 
 class Tone(StrEnum):
@@ -36,7 +38,13 @@ class TransformOptions(BaseModel):
     preserve_numbers: bool = True
     preserve_quotations: bool = True
     custom_author_style: str = ""
+    protected_terms: list[str] = Field(default_factory=list, max_length=50)
     provider: str = "fast-editor"
+
+    @field_validator("protected_terms")
+    @classmethod
+    def validate_protected_terms(cls, value: list[str]) -> list[str]:
+        return normalize_protected_terms(value)
 
 
 class CharacterFinding(BaseModel):
@@ -80,6 +88,7 @@ class SemanticConstraints(BaseModel):
     citations: list[str]
     argument_structure: list[str]
     uncertainties: list[str]
+    protected_terms: list[str] = Field(default_factory=list)
     must_preserve: list[str]
 
 

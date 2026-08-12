@@ -36,6 +36,8 @@ def _checked_values(constraints: SemanticConstraints) -> str:
         _count_label(len(dict.fromkeys(constraints.quotations)), "Zitat", "Zitate"),
         _count_label(len(constraints.core_claims), "Aussage", "Aussagen"),
     ]
+    if constraints.protected_terms:
+        parts.append(_count_label(len(constraints.protected_terms), "eigener Begriff", "eigene Begriffe"))
     return "Automatisch geprüft: " + " · ".join(parts)
 
 
@@ -48,6 +50,8 @@ def _notice(warning: ValidationWarning) -> str:
         return "Der Text war für einen Modelldurchlauf zu lang; geprüft wurde die lokale Schnellfassung."
     if warning.kind == "rewrite_rejected":
         return "Eine möglicherweise inhaltlich veränderte Fassung wurde automatisch verworfen."
+    if warning.kind == "protected_term_not_found":
+        return f"Gewünschter geschützter Begriff nicht im Ausgangstext gefunden: {warning.value}"
     labels = {
         "altered_negation": "Verneinung möglicherweise verändert",
         "altered_uncertainty": "Unsicherheit möglicherweise verändert",

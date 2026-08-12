@@ -102,13 +102,14 @@ def validate_preservation(original: str, rewritten: str, constraints: SemanticCo
               ("date", constraints.dates if preserve_numbers else []),
               ("proper_name", constraints.names),
               ("citation", constraints.citations if preserve_citations else []),
-              ("quotation", constraints.quotations if preserve_quotations else []))
+              ("quotation", constraints.quotations if preserve_quotations else []),
+              ("protected_term", constraints.protected_terms))
     for kind, values in checks:
         for value in values:
             if value not in rewritten:
                 warnings.append(ValidationWarning(kind=f"missing_{kind}", severity="high", value=value,
                     message=f"Original {kind.replace('_', ' ')} is absent or changed in the rewrite."))
-            elif kind in {"number", "date", "citation", "quotation"} and original.count(value) != rewritten.count(value):
+            elif kind in {"number", "date", "citation", "quotation", "protected_term"} and original.count(value) != rewritten.count(value):
                 warnings.append(ValidationWarning(
                     kind=f"altered_{kind}_count",
                     severity="high",
@@ -172,6 +173,7 @@ def validate_preservation(original: str, rewritten: str, constraints: SemanticCo
         ("proper_name", constraints.names),
         ("citation", constraints.citations if preserve_citations else []),
         ("quotation", constraints.quotations if preserve_quotations else []),
+        ("protected_term", constraints.protected_terms),
     ]
     for kind, values in association_groups:
         for value in _reassigned_values(original, rewritten, values):

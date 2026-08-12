@@ -7,6 +7,9 @@
 3. Doppelklicke auf **TextVerbessern.exe**.
 4. Füge den Text ein, klicke auf **Text verbessern** und danach auf **Ergebnis kopieren**.
 
+Sollen interne Bezeichnungen unverändert bleiben, öffne vor der Bearbeitung
+**Begriffe schützen …** und trage pro Zeile einen Begriff aus dem Text ein.
+
 Python, Administratorrechte und eine Installation sind dafür nicht erforderlich.
 
 ## Start aus dem Quellcode

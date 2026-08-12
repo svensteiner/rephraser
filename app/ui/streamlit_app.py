@@ -7,6 +7,7 @@ import streamlit.components.v2 as components
 
 from app.local_runtime import LOCAL_MODEL_MAX_CHARACTERS, local_mistral_ready, local_model_eligible
 from app.models import TransformOptions
+from app.protection import missing_protected_terms, normalize_protected_terms
 from app.pipeline import run_pipeline
 from app.providers.base import ProviderError
 from app.ui_state import ResultState, classify_result_state, result_actions_allowed
@@ -141,6 +142,24 @@ with st.expander("Bearbeitung anpassen"):
     preserve_citations = protection_columns[1].checkbox("Quellen und Links", value=True)
     preserve_quotations = protection_columns[2].checkbox("Wörtliche Zitate", value=True)
     st.caption("Eigennamen und Tatsachenbehauptungen werden unabhängig davon immer geprüft.")
+    protected_terms_text = st.text_area(
+        "Eigene Begriffe exakt schützen (optional)",
+        placeholder="Ein Begriff pro Zeile, z. B. UniCredit BulBank",
+        height=90,
+        max_chars=5_000,
+    )
+    protection_error = ""
+    try:
+        protected_terms = normalize_protected_terms(protected_terms_text.splitlines())
+    except ValueError as error:
+        protected_terms = []
+        protection_error = str(error)
+    if not protection_error:
+        missing_terms = missing_protected_terms(st.session_state.source_text, protected_terms)
+        if missing_terms:
+            protection_error = "Nicht exakt im Ausgangstext gefunden: " + ", ".join(missing_terms[:5])
+    if protection_error:
+        st.warning(protection_error)
 
 tone_map = {
     "Stil beibehalten": "professional", "Professionell": "professional",
@@ -155,7 +174,7 @@ language_map = {
 
 action_label = "Text verbessern"
 run = st.button(action_label, type="primary", use_container_width=True,
-                disabled=not st.session_state.source_text.strip())
+                disabled=not st.session_state.source_text.strip() or bool(protection_error))
 if run:
     if mode_label == "Nur Format bereinigen":
         provider, strength = "rules", "light"
@@ -173,6 +192,7 @@ if run:
         preserve_numbers=preserve_numbers,
         preserve_quotations=preserve_quotations,
         custom_author_style=custom_style,
+        protected_terms=protected_terms,
     )
     message = (
         "Gründliche lokale Mistral-Überarbeitung läuft – höchstens 45 Sekunden."

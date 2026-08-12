@@ -140,6 +140,17 @@
       "expected_output": "See https://example.org/report?q=12.5%25#note for the source.",
       "must_preserve": ["https://example.org/report?q=12.5%25#note"],
       "expected_warning_kinds": []
+    },
+    {
+      "id": "en-explicit-terminology-protection",
+      "language": "en",
+      "category": "terminology-protection",
+      "provider": "fast-editor",
+      "input": "We would like to better understand Project Aurora. In order to proceed, reply.",
+      "expected_output": "We would like to better understand Project Aurora. To proceed, reply.",
+      "protected_terms": ["We would like to better understand", "Project Aurora"],
+      "must_preserve": ["We would like to better understand", "Project Aurora"],
+      "expected_warning_kinds": []
     }
   ]
 }

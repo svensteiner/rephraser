@@ -88,7 +88,7 @@ class LocalMistralProvider(EditorialProvider):
                 + "safe cleanup is still available.",
                 code="model_input_too_long",
             )
-        mandatory_values = list(constraints.names)
+        mandatory_values = list(constraints.names) + list(constraints.protected_terms)
         if options.preserve_numbers:
             mandatory_values.extend(constraints.numbers)
             mandatory_values.extend(constraints.dates)

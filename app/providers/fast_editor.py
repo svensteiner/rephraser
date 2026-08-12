@@ -7,6 +7,7 @@ import re
 from app.models import SemanticConstraints, TransformOptions
 from app.providers.base import EditorialProvider
 from app.providers.local import LocalRuleProvider
+from app.protection import transform_outside_protected_terms
 
 
 PROTECTED_PROSE = re.compile(
@@ -36,11 +37,16 @@ REPLACEMENTS: tuple[tuple[re.Pattern[str], str], ...] = (
 )
 
 
-def _edit_unprotected_prose(text: str) -> str:
+def _apply_replacements(text: str) -> str:
+    for pattern, replacement in REPLACEMENTS:
+        text = pattern.sub(replacement, text)
+    return text
+
+
+def _edit_unprotected_prose(text: str, protected_terms: list[str] | tuple[str, ...] = ()) -> str:
     parts = PROTECTED_PROSE.split(text)
     for index in range(0, len(parts), 2):
-        for pattern, replacement in REPLACEMENTS:
-            parts[index] = pattern.sub(replacement, parts[index])
+        parts[index] = transform_outside_protected_terms(parts[index], protected_terms, _apply_replacements)
     return "".join(parts)
 
 
@@ -51,4 +57,4 @@ class FastEditorialProvider(EditorialProvider):
 
     def rewrite(self, text: str, constraints: SemanticConstraints, options: TransformOptions) -> str:
         cleaned = LocalRuleProvider().rewrite(text, constraints, options)
-        return _edit_unprotected_prose(cleaned)
+        return _edit_unprotected_prose(cleaned, constraints.protected_terms)

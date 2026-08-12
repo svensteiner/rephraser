@@ -26,6 +26,7 @@ class EvaluationCase:
     expected_output: str
     must_preserve: tuple[str, ...]
     expected_warning_kinds: tuple[str, ...]
+    protected_terms: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,6 +74,7 @@ def load_corpus(path: Path = CORPUS_PATH) -> tuple[int, tuple[EvaluationCase, ..
             expected_output=raw["expected_output"],
             must_preserve=tuple(raw.get("must_preserve", [])),
             expected_warning_kinds=tuple(raw.get("expected_warning_kinds", [])),
+            protected_terms=tuple(raw.get("protected_terms", [])),
         )
         if case.id in seen:
             raise ValueError(f"Duplicate evaluation case id: {case.id}")
@@ -85,7 +87,7 @@ def evaluate_case(case: EvaluationCase) -> CaseResult:
     language = {"de": "German", "en": "English"}.get(case.language, "auto-detect")
     result = run_pipeline(
         case.input,
-        TransformOptions(provider=case.provider, language=language),
+        TransformOptions(provider=case.provider, language=language, protected_terms=list(case.protected_terms)),
     )
     failures: list[str] = []
     if result.rewritten_text != case.expected_output:

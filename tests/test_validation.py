@@ -42,6 +42,15 @@ def test_duplicate_protected_fact_is_rejected() -> None:
     assert any(w.kind == "altered_number_count" for w in warnings)
 
 
+def test_explicit_protected_term_must_remain_exact_and_keep_its_count() -> None:
+    original = "Project Aurora gehört zu Project Aurora Holding."
+    constraints = extract_semantics(original, ["Project Aurora"])
+    missing = validate_preservation(original, "Project Borealis gehört zur Holding.", constraints)
+    duplicated = validate_preservation(original, original + " Project Aurora.", constraints)
+    assert any(w.kind == "missing_protected_term" for w in missing)
+    assert any(w.kind == "altered_protected_term_count" for w in duplicated)
+
+
 def test_new_name_and_quotation_are_reported_symmetrically() -> None:
     original = "Die Marge blieb stabil."
     rewritten = 'Die Marge blieb stabil. Anna Müller sagte: "Bestätigt."'

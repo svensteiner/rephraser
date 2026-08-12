@@ -33,6 +33,12 @@ def test_review_summary_reports_exact_scope_without_claiming_proof() -> None:
     assert summary.notices == ()
 
 
+def test_review_summary_reports_user_selected_protected_terms() -> None:
+    selected = constraints().model_copy(update={"protected_terms": ["Project Aurora"]})
+    summary = build_review_summary(selected, [])
+    assert summary.checked_values.endswith(" · 1 eigener Begriff")
+
+
 def test_review_summary_explains_automatic_rejection_as_safe_fallback() -> None:
     summary = build_review_summary(
         constraints(),
