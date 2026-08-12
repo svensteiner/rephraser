@@ -21,6 +21,11 @@ Bei bis zu 100 Änderungsbereichen ermöglicht **Änderungen einzeln auswählen*
 Mischfassung. Jede Kombination wird vor der Übernahme erneut auf geschützte Zahlen,
 Daten, Namen, Quellen, Zitate, Verneinungen, Unsicherheiten und Markdown-Struktur
 geprüft. Eine auffällige Auswahl wird nicht still übernommen.
+Der fertige Text ist standardmäßig gegen versehentliche Eingaben geschützt. Über
+**Ergebnis bearbeiten** lässt er sich bewusst ändern. Kopieren und Speichern bleiben
+dann gesperrt, bis **Manuelle Fassung prüfen** keine Abweichung bei den überwachten
+Inhalten findet. Die App bezeichnet diesen Schutzcheck ausdrücklich nicht als
+Bedeutungs-Garantie.
 Eine verständliche Inhaltsprüfung nennt den tatsächlich geprüften Umfang und zeigt klar,
 ob keine überwachte Abweichung gefunden, eine unsichere Fassung automatisch verworfen
 oder eine Stelle manuell zu kontrollieren ist. Sie weist ausdrücklich darauf hin, dass

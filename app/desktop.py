@@ -13,7 +13,7 @@ from app.change_preview import ChangeSegment, apply_change_selection, build_chan
 from app.local_runtime import LOCAL_MODEL_MAX_CHARACTERS, local_mistral_ready, local_model_eligible
 from app import __version__
 from app.diagnostics import diagnostic_log_path, write_diagnostic_event
-from app.models import AuditReport, TransformOptions
+from app.models import AuditReport, TransformOptions, ValidationWarning
 from app.pipeline import run_pipeline
 from app.providers.base import ProviderError
 from app.review_summary import build_review_summary
@@ -100,6 +100,8 @@ class DesktopApp:
         self.processed_source: str | None = None
         self.generated_result = ""
         self.last_audit: AuditReport | None = None
+        self.output_editing = False
+        self.manual_result_verified = False
         self.busy = False
         self.processing_active = False
         self.processing_started = 0.0
@@ -183,12 +185,22 @@ class DesktopApp:
             state="disabled",
         )
         self.changes_button.pack(side="left", padx=(12, 0))
+        self.edit_result_button = ttk.Button(
+            self.result_line,
+            text="Ergebnis bearbeiten",
+            command=self.toggle_result_editing,
+            style="Secondary.TButton",
+            state="disabled",
+        )
+        self.edit_result_button.pack(side="left", padx=(8, 0))
         self.copy_button = ttk.Button(
             self.result_line, text="Ergebnis kopieren", command=self.copy_result,
             style="Secondary.TButton", state="disabled"
         )
         self.copy_button.pack(side="right")
         self.output_text = scrolledtext.ScrolledText(outer, height=10, wrap="word", font=("Segoe UI", 11), undo=True)
+        self.output_text.configure(state="disabled")
+        self.output_text.bind("<<Modified>>", self._output_changed)
         self.result_visible = False
 
         self.bottom = ttk.Frame(outer)
@@ -264,6 +276,8 @@ class DesktopApp:
         if self.processed_source is not None and source != self.processed_source:
             self.copy_button.configure(state="disabled")
             self.changes_button.configure(state="disabled")
+            self.edit_result_button.configure(state="disabled")
+            self.manual_result_verified = False
             self.result_status.configure(text="Ausgangstext geändert – bitte erneut bearbeiten.")
 
     def open_file(self) -> None:
@@ -295,6 +309,7 @@ class DesktopApp:
             return
         self.run_button.configure(state="disabled", text=primary_action_label(self.mistral_ready))
         self.busy = True
+        self.manual_result_verified = False
         self.copy_button.configure(state="disabled")
         self.input_text.configure(state="disabled")
         self.mode_box.configure(state="disabled")
@@ -393,13 +408,17 @@ class DesktopApp:
             self.result_line.pack(fill="x", before=self.bottom)
             self.output_text.pack(fill="both", expand=True, pady=(6, 8), before=self.bottom)
             self.result_visible = True
-        self.output_text.delete("1.0", "end")
-        self.output_text.insert("1.0", rewritten)
+        self._replace_output(rewritten)
         self.processed_source = source
         self.generated_result = rewritten
         self.last_audit = result.audit
+        self.manual_result_verified = True
         self.copy_button.configure(state="normal")
         self.changes_button.configure(state="normal" if changed else "disabled")
+        self.edit_result_button.configure(
+            state="normal" if len(rewritten) <= CHANGE_PREVIEW_MAX_CHARACTERS else "disabled",
+            text="Ergebnis bearbeiten",
+        )
         self.copy_button.focus_set()
         warning_kinds = {warning.kind for warning in result.audit.fact_preservation_warnings}
         if "model_input_too_long" in warning_kinds:
@@ -421,6 +440,77 @@ class DesktopApp:
         else:
             message = "Fertig – Formatierungsartefakte bereinigt; der Text wurde nicht sprachlich umformuliert."
         self.result_status.configure(text=message)
+
+    def _replace_output(self, text: str, *, editable: bool = False) -> None:
+        self.output_text.configure(state="normal")
+        self.output_text.delete("1.0", "end")
+        self.output_text.insert("1.0", text)
+        self.output_text.edit_modified(False)
+        self.output_text.configure(state="normal" if editable else "disabled")
+        self.output_editing = editable
+
+    def _output_changed(self, _event: object | None = None) -> None:
+        if not self.output_text.edit_modified():
+            return
+        self.output_text.edit_modified(False)
+        if not self.output_editing:
+            return
+        self.manual_result_verified = False
+        self.copy_button.configure(state="disabled")
+        self.changes_button.configure(state="disabled")
+        self.result_status.configure(
+            text="Manuell geändert – vor dem Kopieren bitte die Fassung prüfen."
+        )
+
+    def _candidate_warnings(self, source: str, candidate: str) -> list[ValidationWarning]:
+        if self.last_audit is None:
+            return []
+        options = self.last_audit.options
+        return validate_preservation(
+            source,
+            candidate,
+            self.last_audit.semantic_constraints,
+            preserve_numbers=bool(options.get("preserve_numbers", True)),
+            preserve_citations=bool(options.get("preserve_citations", True)),
+            preserve_quotations=bool(options.get("preserve_quotations", True)),
+        )
+
+    def toggle_result_editing(self) -> None:
+        source = self.input_text.get("1.0", "end-1c")
+        if source != self.processed_source or self.busy:
+            return
+        if not self.output_editing:
+            current = self.output_text.get("1.0", "end-1c")
+            self._replace_output(current, editable=True)
+            self.manual_result_verified = False
+            self.copy_button.configure(state="disabled")
+            self.changes_button.configure(state="disabled")
+            self.edit_result_button.configure(text="Manuelle Fassung prüfen")
+            self.result_status.configure(
+                text="Bearbeitungsmodus – Kopieren ist bis zum lokalen Schutzcheck gesperrt."
+            )
+            self.output_text.focus_set()
+            return
+
+        candidate = self.output_text.get("1.0", "end-1c")
+        warnings = self._candidate_warnings(source, candidate)
+        if warnings:
+            summary = build_review_summary(self.last_audit.semantic_constraints, warnings)
+            details = "\n".join(f"• {notice}" for notice in summary.notices[:5])
+            self.messagebox.showwarning(
+                "Manuelle Fassung noch nicht freigegeben",
+                f"{summary.message}\n\n{details}\n\nBitte korrigiere die Fassung oder verwerfe die manuellen Änderungen.",
+            )
+            return
+        self._replace_output(candidate)
+        self.manual_result_verified = True
+        self.copy_button.configure(state="normal")
+        self.changes_button.configure(state="normal" if self.generated_result != source else "disabled")
+        self.edit_result_button.configure(text="Ergebnis bearbeiten")
+        self.result_status.configure(
+            text="Manuelle Fassung geprüft – keine Abweichung bei den überwachten Inhalten gefunden; "
+                 "keine Bedeutungs-Garantie."
+        )
 
     def _show_error(self, error: Exception, request_id: int) -> None:
         if not request_is_current(request_id, self.active_request_id, self.closed):
@@ -707,15 +797,7 @@ class DesktopApp:
         if self.last_audit is None:
             return
         candidate = apply_change_selection(source, segments, selected)
-        options = self.last_audit.options
-        warnings = validate_preservation(
-            source,
-            candidate,
-            self.last_audit.semantic_constraints,
-            preserve_numbers=bool(options.get("preserve_numbers", True)),
-            preserve_citations=bool(options.get("preserve_citations", True)),
-            preserve_quotations=bool(options.get("preserve_quotations", True)),
-        )
+        warnings = self._candidate_warnings(source, candidate)
         if warnings:
             summary = build_review_summary(self.last_audit.semantic_constraints, warnings)
             details = "\n".join(f"• {notice}" for notice in summary.notices[:5])
@@ -725,16 +807,18 @@ class DesktopApp:
                 parent=window,
             )
             return
-        self.output_text.delete("1.0", "end")
-        self.output_text.insert("1.0", candidate)
+        self._replace_output(candidate)
+        self.manual_result_verified = True
         self.copy_button.configure(state="normal")
+        self.edit_result_button.configure(state="normal", text="Ergebnis bearbeiten")
         self.result_status.configure(text="Geprüfte Einzelauswahl übernommen – bereit zum Kopieren.")
         window.destroy()
 
     def _use_reviewed_text(self, text: str, window: object, *, improved: bool) -> None:
-        self.output_text.delete("1.0", "end")
-        self.output_text.insert("1.0", text)
+        self._replace_output(text)
+        self.manual_result_verified = True
         self.copy_button.configure(state="normal")
+        self.edit_result_button.configure(state="normal", text="Ergebnis bearbeiten")
         self.changes_button.configure(state="normal" if self.generated_result != self.processed_source else "disabled")
         self.result_status.configure(
             text="Verbesserung ausgewählt – bereit zum Kopieren."
@@ -746,7 +830,9 @@ class DesktopApp:
     def copy_result(self) -> None:
         source = self.input_text.get("1.0", "end-1c")
         result = self.output_text.get("1.0", "end-1c")
-        if not result_is_current(source, self.processed_source, result, self.busy):
+        if not self.manual_result_verified or not result_is_current(
+            source, self.processed_source, result, self.busy
+        ):
             return
         self.root.clipboard_clear()
         self.root.clipboard_append(result)
@@ -758,10 +844,13 @@ class DesktopApp:
     def save_result(self) -> None:
         source = self.input_text.get("1.0", "end-1c")
         result = self.output_text.get("1.0", "end-1c")
-        if not result_is_current(source, self.processed_source, result, self.busy):
+        if not self.manual_result_verified or not result_is_current(
+            source, self.processed_source, result, self.busy
+        ):
             self.messagebox.showinfo(
                 "Kein aktuelles Ergebnis",
-                "Bitte den aktuellen Ausgangstext zuerst bearbeiten; ein älteres Ergebnis wird nicht gespeichert.",
+                "Bitte den aktuellen Ausgangstext bearbeiten und manuelle Änderungen zuerst prüfen; "
+                "eine ungeprüfte oder ältere Fassung wird nicht gespeichert.",
             )
             return
         path = self.filedialog.asksaveasfilename(
@@ -779,13 +868,15 @@ class DesktopApp:
 
     def clear_all(self) -> None:
         self.input_text.delete("1.0", "end")
-        self.output_text.delete("1.0", "end")
+        self._replace_output("")
         self.copy_button.configure(state="disabled")
         self.copy_button.configure(text="Ergebnis kopieren")
         self.changes_button.configure(state="disabled")
+        self.edit_result_button.configure(state="disabled", text="Ergebnis bearbeiten")
         self.processed_source = None
         self.generated_result = ""
         self.last_audit = None
+        self.manual_result_verified = False
         if self.result_visible:
             self.result_line.pack_forget()
             self.output_text.pack_forget()

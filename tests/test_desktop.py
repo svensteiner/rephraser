@@ -108,11 +108,17 @@ def test_review_choice_replaces_output_and_keeps_generated_version_recoverable()
     class TextBox:
         value = "Verbesserung"
 
+        def configure(self, **values):
+            return None
+
         def delete(self, start, end):
             self.value = ""
 
         def insert(self, start, text):
             self.value = text
+
+        def edit_modified(self, value):
+            return None
 
     class Widget:
         def __init__(self):
@@ -131,6 +137,7 @@ def test_review_choice_replaces_output_and_keeps_generated_version_recoverable()
     app.output_text = TextBox()
     app.copy_button = Widget()
     app.changes_button = Widget()
+    app.edit_result_button = Widget()
     app.result_status = Widget()
     app.generated_result = "Verbesserung"
     app.processed_source = "Original"
@@ -229,11 +236,17 @@ def test_individual_change_selection_is_revalidated_and_applied() -> None:
     class TextBox:
         value = ""
 
+        def configure(self, **values):
+            return None
+
         def delete(self, start, end):
             self.value = ""
 
         def insert(self, start, text):
             self.value = text
+
+        def edit_modified(self, value):
+            return None
 
     class Widget:
         values = {}
@@ -255,6 +268,7 @@ def test_individual_change_selection_is_revalidated_and_applied() -> None:
     app.last_audit = result.audit
     app.output_text = TextBox()
     app.copy_button = Widget()
+    app.edit_result_button = Widget()
     app.result_status = Widget()
     app.messagebox = object()
     window = Window()
@@ -313,3 +327,156 @@ def test_individual_change_selection_with_semantic_warning_is_blocked() -> None:
     assert warnings and warnings[0][0] == "Auswahl nicht übernommen"
     assert "Verneinung" in warnings[0][1]
     assert window.destroyed is False
+
+
+def test_manual_result_edit_requires_successful_recheck_before_copy() -> None:
+    from app.desktop import DesktopApp
+    from app.models import TransformOptions
+    from app.pipeline import run_pipeline
+
+    class TextBox:
+        def __init__(self, value):
+            self.value = value
+            self.modified = False
+            self.state = "disabled"
+
+        def configure(self, **values):
+            self.state = values.get("state", self.state)
+
+        def delete(self, start, end):
+            self.value = ""
+
+        def insert(self, start, text):
+            self.value = text
+
+        def get(self, start, end):
+            return self.value
+
+        def edit_modified(self, value=None):
+            if value is None:
+                return self.modified
+            self.modified = value
+
+        def focus_set(self):
+            return None
+
+    class Source:
+        def get(self, start, end):
+            return "Der Betrag bleibt 12,5 %."
+
+    class Widget:
+        def __init__(self):
+            self.values = {}
+
+        def configure(self, **values):
+            self.values.update(values)
+
+    source = "Der Betrag bleibt 12,5 %."
+    result = run_pipeline(source, TransformOptions(provider="rules"))
+    app = DesktopApp.__new__(DesktopApp)
+    app.input_text = Source()
+    app.output_text = TextBox(source)
+    app.processed_source = source
+    app.generated_result = source
+    app.last_audit = result.audit
+    app.output_editing = False
+    app.manual_result_verified = True
+    app.busy = False
+    app.copy_button = Widget()
+    app.changes_button = Widget()
+    app.edit_result_button = Widget()
+    app.result_status = Widget()
+
+    app.toggle_result_editing()
+    assert app.output_editing is True
+    assert app.manual_result_verified is False
+    assert app.copy_button.values["state"] == "disabled"
+    app.output_text.value = "Der Betrag bleibt 12,5 % und ist bestätigt."
+    app.toggle_result_editing()
+
+    assert app.output_editing is False
+    assert app.manual_result_verified is True
+    assert app.output_text.state == "disabled"
+    assert app.copy_button.values["state"] == "normal"
+    assert "keine Bedeutungs-Garantie" in app.result_status.values["text"]
+
+
+def test_manual_result_edit_with_missing_protected_value_stays_blocked() -> None:
+    from app.desktop import DesktopApp
+    from app.models import TransformOptions
+    from app.pipeline import run_pipeline
+
+    shown = []
+
+    class TextBox:
+        value = "Der Betrag fehlt."
+
+        def get(self, start, end):
+            return self.value
+
+    class Source:
+        def get(self, start, end):
+            return "Der Betrag bleibt 12,5 %."
+
+    class MessageBox:
+        def showwarning(self, title, message):
+            shown.append((title, message))
+
+    source = "Der Betrag bleibt 12,5 %."
+    result = run_pipeline(source, TransformOptions(provider="rules"))
+    app = DesktopApp.__new__(DesktopApp)
+    app.input_text = Source()
+    app.output_text = TextBox()
+    app.processed_source = source
+    app.last_audit = result.audit
+    app.output_editing = True
+    app.manual_result_verified = False
+    app.busy = False
+    app.messagebox = MessageBox()
+
+    app.toggle_result_editing()
+
+    assert app.output_editing is True
+    assert app.manual_result_verified is False
+    assert shown and shown[0][0] == "Manuelle Fassung noch nicht freigegeben"
+    assert "12,5 %" in shown[0][1]
+
+
+def test_unverified_manual_result_cannot_be_copied_or_reach_save_dialog() -> None:
+    from app.desktop import DesktopApp
+
+    infos = []
+
+    class Text:
+        def __init__(self, value):
+            self.value = value
+
+        def get(self, start, end):
+            return self.value
+
+    class Root:
+        def clipboard_clear(self):
+            raise AssertionError("unverified text must not reach clipboard")
+
+    class FileDialog:
+        def asksaveasfilename(self, **kwargs):
+            raise AssertionError("unverified text must not reach save dialog")
+
+    class MessageBox:
+        def showinfo(self, title, message):
+            infos.append((title, message))
+
+    app = DesktopApp.__new__(DesktopApp)
+    app.input_text = Text("Quelle")
+    app.output_text = Text("Manuell geändert")
+    app.processed_source = "Quelle"
+    app.busy = False
+    app.manual_result_verified = False
+    app.root = Root()
+    app.filedialog = FileDialog()
+    app.messagebox = MessageBox()
+
+    app.copy_result()
+    app.save_result()
+
+    assert infos and "ungeprüfte" in infos[0][1]
