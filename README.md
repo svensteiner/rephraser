@@ -36,7 +36,9 @@ ob keine überwachte Abweichung gefunden, eine unsichere Fassung automatisch ver
 oder eine Stelle manuell zu kontrollieren ist. Sie weist ausdrücklich darauf hin, dass
 wichtige Texte weiterhin selbst gelesen werden sollten.
 Während einer gründlichen Mistral-Bearbeitung liefert **Sichere Fassung jetzt** ohne
-weiteres Warten die lokale Schnellbearbeitung.
+weiteres Warten die lokale Schnellbearbeitung. Spätestens nach 45 Sekunden wechselt die
+Desktop-App automatisch dorthin, reaktiviert alle Bedienelemente und ignoriert eine
+eventuell später eintreffende Modellantwort.
 Über **Begriffe schützen …** können optional interne Projekt-, Produkt- oder Kontonamen
 eingetragen werden – ein Begriff pro Zeile. Die App akzeptiert nur Begriffe, die im
 Ausgangstext exakt vorkommen, erhält Schreibweise und Häufigkeit und prüft den Schutz

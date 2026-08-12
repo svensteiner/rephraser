@@ -11,6 +11,7 @@ NON_CONTENT_WARNINGS = {
     "model_input_too_long",
     "provider_timeout",
     "provider_unavailable",
+    "user_selected_safe_fallback",
 }
 
 
@@ -50,6 +51,8 @@ def _notice(warning: ValidationWarning) -> str:
         return "Der Text war für einen Modelldurchlauf zu lang; geprüft wurde die lokale Schnellfassung."
     if warning.kind == "rewrite_rejected":
         return "Eine möglicherweise inhaltlich veränderte Fassung wurde automatisch verworfen."
+    if warning.kind == "user_selected_safe_fallback":
+        return "Die sichere lokale Schnellfassung wurde auf Wunsch sofort verwendet."
     if warning.kind == "protected_term_not_found":
         return f"Gewünschter geschützter Begriff nicht im Ausgangstext gefunden: {warning.value}"
     labels = {

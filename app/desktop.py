@@ -27,6 +27,7 @@ from app.validation import validate_preservation
 MODE_AUTOMATIC = "Schnell verbessern (empfohlen)"
 MODE_SAFE = "Nur Format bereinigen"
 MODE_STRONG = "Gründlich mit Mistral (bis 45 s)"
+MODEL_UI_DEADLINE_SECONDS = 45.0
 MAX_CHARACTERS = 2_000_000
 CHANGE_PREVIEW_MAX_CHARACTERS = 200_000
 INDIVIDUAL_CHANGE_MAX_GROUPS = 100
@@ -559,7 +560,7 @@ class DesktopApp:
         )
         thread.start()
 
-    def use_safe_result_now(self) -> None:
+    def use_safe_result_now(self, *, automatically: bool = False) -> None:
         """Abandon a slow model result and immediately produce the local fast version."""
         if not self.busy or not self.processing_active:
             return
@@ -568,10 +569,20 @@ class DesktopApp:
         request_id = self.active_request_id
         self.processing_active = False
         self.run_button.configure(state="disabled", text=primary_action_label(self.mistral_ready))
-        self.result_status.configure(text="Sichere lokale Fassung wird sofort erstellt …")
+        self.result_status.configure(
+            text=("Zeitgrenze erreicht – sichere lokale Fassung wird erstellt …"
+                  if automatically else "Sichere lokale Fassung wird sofort erstellt …")
+        )
         thread = threading.Thread(
             target=self._worker,
-            args=(source, "fast-editor", "medium", request_id, self.protected_terms),
+            args=(
+                source,
+                "fast-editor",
+                "medium",
+                request_id,
+                self.protected_terms,
+                "provider_timeout" if automatically else "user_selected_safe_fallback",
+            ),
             daemon=True,
             name="safe-editor-fallback",
         )
@@ -580,7 +591,11 @@ class DesktopApp:
     def _update_elapsed_time(self) -> None:
         if not self.processing_active:
             return
-        elapsed = int(time.monotonic() - self.processing_started)
+        elapsed_seconds = time.monotonic() - self.processing_started
+        if elapsed_seconds >= MODEL_UI_DEADLINE_SECONDS:
+            self.use_safe_result_now(automatically=True)
+            return
+        elapsed = int(elapsed_seconds)
         self.result_status.configure(
             text=f"Lokale Überarbeitung läuft … {elapsed} s (höchstens 45 s)"
         )
@@ -593,6 +608,7 @@ class DesktopApp:
         strength: str,
         request_id: int,
         protected_terms: tuple[str, ...] = (),
+        fallback_kind: str | None = None,
     ) -> None:
         try:
             options = TransformOptions(
@@ -605,6 +621,24 @@ class DesktopApp:
                 protected_terms=list(protected_terms),
             )
             result = run_pipeline(source, options)
+            if fallback_kind is not None:
+                result.audit.requested_provider = "rules+mistral-local"
+                result.audit.options["provider"] = "rules+mistral-local"
+                if fallback_kind == "provider_timeout":
+                    result.audit.fact_preservation_warnings.append(ValidationWarning(
+                        kind="provider_timeout",
+                        severity="medium",
+                        value="desktop_ui_deadline",
+                        message=("Die Desktop-Zeitgrenze wurde erreicht; ausgegeben wurde die "
+                                 "sichere lokale Schnellfassung."),
+                    ))
+                else:
+                    result.audit.fact_preservation_warnings.append(ValidationWarning(
+                        kind="user_selected_safe_fallback",
+                        severity="medium",
+                        value="safe_result_now",
+                        message="Die sichere lokale Schnellfassung wurde manuell gewählt.",
+                    ))
         except Exception as error:  # UI boundary: always return control to the user.
             self._schedule_ui(self._show_error, error, request_id)
             return
@@ -663,9 +697,11 @@ class DesktopApp:
         if "model_input_too_long" in warning_kinds:
             message = "Text war für Mistral zu lang; vollständig lokal schnell bearbeitet."
         elif "provider_timeout" in warning_kinds:
-            message = "Mistral hat die Zeitgrenze erreicht; sicher bereinigtes Ergebnis angezeigt."
+            message = "Mistral hat die Zeitgrenze erreicht; sichere lokale Fassung angezeigt."
         elif "provider_unavailable" in warning_kinds:
             message = "Mistral war nicht rechtzeitig verfügbar; sicher bereinigtes Ergebnis angezeigt."
+        elif "user_selected_safe_fallback" in warning_kinds:
+            message = "Sichere lokale Fassung gewählt – bereit zum Kopieren."
         elif "rewrite_rejected" in warning_kinds:
             message = "Sicher bereinigt; eine unsichere Modellfassung wurde verworfen."
         elif result.audit.fact_preservation_warnings:

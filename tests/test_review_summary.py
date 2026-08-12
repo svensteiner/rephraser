@@ -55,6 +55,15 @@ def test_review_summary_explains_automatic_rejection_as_safe_fallback() -> None:
     assert any("inhaltlich veränderte Fassung" in notice for notice in summary.notices)
 
 
+def test_review_summary_treats_user_selected_safe_fallback_as_information() -> None:
+    summary = build_review_summary(
+        constraints(),
+        [warning("user_selected_safe_fallback", "safe_result_now")],
+    )
+    assert summary.level == "passed"
+    assert any("auf Wunsch" in notice for notice in summary.notices)
+
+
 def test_review_summary_never_hides_remaining_semantic_warning() -> None:
     summary = build_review_summary(
         constraints(),

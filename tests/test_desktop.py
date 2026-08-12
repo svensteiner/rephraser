@@ -130,8 +130,75 @@ def test_safe_result_action_invalidates_slow_model_and_starts_fast_editor(monkey
 
     assert app.active_request_id == 8
     assert app.processing_active is False
-    assert started_with == [("Ein unveränderter Text.", "fast-editor", "medium", 8, ())]
+    assert started_with == [(
+        "Ein unveränderter Text.",
+        "fast-editor",
+        "medium",
+        8,
+        (),
+        "user_selected_safe_fallback",
+    )]
     assert any(item.get("text") == "Sichere lokale Fassung wird sofort erstellt …" for item in configured)
+
+
+def test_ui_watchdog_automatically_uses_safe_result_at_deadline(monkeypatch) -> None:
+    from app.desktop import DesktopApp, MODEL_UI_DEADLINE_SECONDS
+
+    called = []
+    app = DesktopApp.__new__(DesktopApp)
+    app.processing_active = True
+    app.processing_started = 100.0
+    app.use_safe_result_now = lambda *, automatically=False: called.append(automatically)
+    monkeypatch.setattr("app.desktop.time.monotonic", lambda: 100.0 + MODEL_UI_DEADLINE_SECONDS)
+
+    app._update_elapsed_time()
+
+    assert called == [True]
+
+
+def test_ui_watchdog_keeps_counting_before_deadline(monkeypatch) -> None:
+    from app.desktop import DesktopApp
+
+    configured = []
+    scheduled = []
+
+    class Widget:
+        def configure(self, **values):
+            configured.append(values)
+
+    class Root:
+        def after(self, delay, callback):
+            scheduled.append((delay, callback))
+
+    app = DesktopApp.__new__(DesktopApp)
+    app.processing_active = True
+    app.processing_started = 100.0
+    app.result_status = Widget()
+    app.root = Root()
+    monkeypatch.setattr("app.desktop.time.monotonic", lambda: 144.9)
+
+    app._update_elapsed_time()
+
+    assert configured[-1]["text"] == "Lokale Überarbeitung läuft … 44 s (höchstens 45 s)"
+    assert scheduled[0][0] == 1000
+
+
+def test_timeout_fallback_is_recorded_in_audit() -> None:
+    from app.desktop import DesktopApp
+
+    scheduled = []
+    app = DesktopApp.__new__(DesktopApp)
+    app._schedule_ui = lambda callback, *args: scheduled.append(args)
+
+    app._worker("Ein klarer Text.", "fast-editor", "medium", 9, (), "provider_timeout")
+
+    result, provider, request_id = scheduled[0]
+    assert provider == "fast-editor"
+    assert request_id == 9
+    assert result.audit.requested_provider == "rules+mistral-local"
+    assert result.audit.options["provider"] == "rules+mistral-local"
+    assert result.audit.applied_provider == "fast-editor"
+    assert any(w.kind == "provider_timeout" for w in result.audit.fact_preservation_warnings)
 
 
 def test_review_choice_replaces_output_and_keeps_generated_version_recoverable() -> None:
