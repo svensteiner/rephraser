@@ -41,7 +41,11 @@ weiteres Warten die lokale Schnellbearbeitung.
 **Info & Hilfe** zeigt die installierte Version und den lokalen Modellstatus. Für den
 Support lassen sich datenschutzarme Diagnoseinformationen kopieren. Sie enthalten nur
 Laufzeitmetadaten und den Hinweis, ob ein Metadatenprotokoll vorhanden ist – niemals den
-eingefügten Text, Dokumentinhalte, Benutzernamen oder Fehlermeldungsinhalte.
+eingefügten Text, Dokumentinhalte, Benutzernamen oder Fehlermeldungsinhalte. Dort können
+außerdem **Größere Schrift** und **Hoher Kontrast** aktiviert werden. Diese beiden
+Ansichtseinstellungen gelten sofort für Eingabe, Ergebnis und Prüffenster und werden
+ohne Administratorrechte lokal unter `%LOCALAPPDATA%` gespeichert. Die Einstellungsdatei
+enthält keinerlei Text- oder Dokumentdaten.
 
 Die Browser-Oberfläche zeigt nach der Bearbeitung **Original und Ergebnis nebeneinander**.
 Unter **Bearbeitung anpassen** lassen sich Sprache sowie der exakte Schutz von Zahlen

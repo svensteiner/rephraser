@@ -18,6 +18,7 @@ from app.pipeline import run_pipeline
 from app.providers.base import ProviderError
 from app.review_summary import build_review_summary
 from app.support import build_support_info
+from app.ui_preferences import UiPreferences, load_ui_preferences, save_ui_preferences
 from app.ui_state import classify_result_state, result_actions_allowed
 from app.validation import validate_preservation
 
@@ -93,6 +94,7 @@ class DesktopApp:
 
     def __init__(self) -> None:
         import tkinter as tk
+        import tkinter.font as tkfont
         from tkinter import filedialog, messagebox, scrolledtext, ttk
 
         self.tk = tk
@@ -101,10 +103,17 @@ class DesktopApp:
         self.filedialog = filedialog
         self.messagebox = messagebox
         self.root = tk.Tk()
+        self.ui_preferences = load_ui_preferences()
         self.root.title("Text verbessern")
         self.root.geometry("940x760")
         self.root.minsize(760, 620)
-        self.root.configure(background="#f4f7f5")
+        self.body_font = tkfont.Font(root=self.root, family="Segoe UI", size=11)
+        self.body_bold_font = tkfont.Font(root=self.root, family="Segoe UI", size=11, weight="bold")
+        self.title_font = tkfont.Font(root=self.root, family="Segoe UI", size=22, weight="bold")
+        self.dialog_title_font = tkfont.Font(root=self.root, family="Segoe UI", size=17, weight="bold")
+        self.hint_font = tkfont.Font(root=self.root, family="Segoe UI", size=10)
+        self.hint_bold_font = tkfont.Font(root=self.root, family="Segoe UI", size=10, weight="bold")
+        self.mono_font = tkfont.Font(root=self.root, family="Consolas", size=9)
         self.mistral_ready = local_mistral_ready()
         self.processed_source: str | None = None
         self.generated_result = ""
@@ -121,13 +130,9 @@ class DesktopApp:
         self.root.protocol("WM_DELETE_WINDOW", self._close)
         self.root.after(50, self._drain_ui_events)
 
-        style = ttk.Style(self.root)
-        style.theme_use("vista" if "vista" in style.theme_names() else style.theme_use())
-        style.configure("Title.TLabel", font=("Segoe UI", 22, "bold"), background="#f4f7f5")
-        style.configure("Hint.TLabel", font=("Segoe UI", 10), background="#f4f7f5", foreground="#456054")
-        style.configure("Status.TLabel", font=("Segoe UI", 10, "bold"), padding=9)
-        style.configure("Primary.TButton", font=("Segoe UI", 11, "bold"), padding=(18, 10))
-        style.configure("Secondary.TButton", font=("Segoe UI", 10), padding=(12, 8))
+        self.style = ttk.Style(self.root)
+        self.default_theme = "vista" if "vista" in self.style.theme_names() else self.style.theme_use()
+        self._apply_view_preferences()
 
         outer = ttk.Frame(self.root, padding=(28, 22, 28, 20))
         outer.pack(fill="both", expand=True)
@@ -148,7 +153,7 @@ class DesktopApp:
 
         top_line = ttk.Frame(outer)
         top_line.pack(fill="x")
-        ttk.Label(top_line, text="Dein Text", font=("Segoe UI", 11, "bold")).pack(side="left")
+        ttk.Label(top_line, text="Dein Text", font=self.body_bold_font).pack(side="left")
         ttk.Button(top_line, text="Datei öffnen", command=self.open_file, style="Secondary.TButton").pack(side="right")
         self.paste_button = ttk.Button(
             top_line,
@@ -157,7 +162,7 @@ class DesktopApp:
             style="Secondary.TButton",
         )
         self.paste_button.pack(side="right", padx=(0, 8))
-        self.input_text = scrolledtext.ScrolledText(outer, height=10, wrap="word", font=("Segoe UI", 11), undo=True)
+        self.input_text = scrolledtext.ScrolledText(outer, height=10, wrap="word", font=self.body_font, undo=True)
         self.input_text.pack(fill="both", expand=True, pady=(6, 3))
         self.input_text.bind("<<Modified>>", self._source_changed)
         self.source_count = tk.StringVar(value="0 Wörter · 0 Zeichen")
@@ -186,7 +191,7 @@ class DesktopApp:
         self.progress.pack(side="right", padx=12)
 
         self.result_line = ttk.Frame(outer)
-        ttk.Label(self.result_line, text="Fertiger Text", font=("Segoe UI", 11, "bold")).pack(side="left")
+        ttk.Label(self.result_line, text="Fertiger Text", font=self.body_bold_font).pack(side="left")
         self.changes_button = ttk.Button(
             self.result_line,
             text="Änderungen ansehen",
@@ -216,7 +221,7 @@ class DesktopApp:
             style="Secondary.TButton", state="disabled"
         )
         self.copy_button.pack(side="right")
-        self.output_text = scrolledtext.ScrolledText(outer, height=10, wrap="word", font=("Segoe UI", 11), undo=True)
+        self.output_text = scrolledtext.ScrolledText(outer, height=10, wrap="word", font=self.body_font, undo=True)
         self.output_text.configure(state="disabled")
         self.output_text.bind("<<Modified>>", self._output_changed)
         self.output_text.bind("<Escape>", lambda _event: self.discard_manual_edits())
@@ -253,7 +258,106 @@ class DesktopApp:
         self._bind_shortcut("<Control-Return>", self.start_processing)
         self._bind_shortcut("<Control-e>", self.toggle_result_editing)
         self._bind_shortcut("<Control-Shift-C>", self.copy_result)
+        self._apply_text_palette(self.root)
         self.input_text.focus_set()
+
+    def _apply_view_preferences(self) -> None:
+        """Apply accessible fonts and colours immediately to all open windows."""
+        large = self.ui_preferences.large_text
+        sizes = (14, 14, 27, 21, 12, 12, 11) if large else (11, 11, 22, 17, 10, 10, 9)
+        for font, size in zip(
+            (self.body_font, self.body_bold_font, self.title_font, self.dialog_title_font,
+             self.hint_font, self.hint_bold_font, self.mono_font),
+            sizes,
+            strict=True,
+        ):
+            font.configure(size=size)
+
+        contrast = self.ui_preferences.high_contrast
+        background = "#101010" if contrast else "#f4f7f5"
+        foreground = "#ffffff" if contrast else "#17251e"
+        hint = "#f2f2f2" if contrast else "#456054"
+        field_background = "#000000" if contrast else "#ffffff"
+        selected = "#ffd800" if contrast else "#0b6b3a"
+        selected_text = "#000000" if contrast else "#ffffff"
+
+        theme = "clam" if contrast and "clam" in self.style.theme_names() else self.default_theme
+        self.style.theme_use(theme)
+        self.root.configure(background=background)
+        self.style.configure("TFrame", background=background)
+        self.style.configure("TLabel", background=background, foreground=foreground, font=self.body_font)
+        self.style.configure("TLabelframe", background=background, foreground=foreground)
+        self.style.configure("TLabelframe.Label", background=background, foreground=foreground, font=self.body_bold_font)
+        self.style.configure("TCheckbutton", background=background, foreground=foreground, font=self.body_font)
+        self.style.configure("Title.TLabel", font=self.title_font, background=background, foreground=foreground)
+        self.style.configure("Hint.TLabel", font=self.hint_font, background=background, foreground=hint)
+        self.style.configure("Status.TLabel", font=self.hint_bold_font, padding=9)
+        self.style.configure("Primary.TButton", font=self.body_bold_font, padding=(18, 10))
+        self.style.configure("Secondary.TButton", font=self.hint_font, padding=(12, 8))
+        self.style.configure("Accessible.TCombobox", font=self.body_font)
+        if contrast:
+            for style_name in ("TButton", "Primary.TButton", "Secondary.TButton"):
+                self.style.configure(style_name, background="#ffffff", foreground="#000000")
+                self.style.map(style_name, background=[("active", "#ffd800")])
+            self.style.configure("TCombobox", fieldbackground=field_background, foreground=foreground)
+        self._text_palette = {
+            "background": field_background,
+            "foreground": foreground,
+            "insertbackground": foreground,
+            "selectbackground": selected,
+            "selectforeground": selected_text,
+        }
+        self._panel_background = background
+        if hasattr(self, "root"):
+            self._apply_text_palette(self.root)
+
+    def _apply_text_palette(self, widget: object) -> None:
+        """Apply the active palette to Tk text fields in a widget tree."""
+        if isinstance(widget, self.tk.Text):
+            try:
+                widget.configure(**self._text_palette)
+                if "changed" in widget.tag_names():
+                    existing = str(widget.tag_cget("changed", "foreground")).lower()
+                    is_after = existing in {"#145c2c", "#176b36", "#8cffad"}
+                    widget.tag_configure(
+                        "changed",
+                        background=(
+                            "#124522" if is_after else "#5c1111"
+                        ) if self.ui_preferences.high_contrast else (
+                            "#d9f5df" if is_after else "#ffd9d9"
+                        ),
+                        foreground=self._semantic_color("after" if is_after else "before"),
+                    )
+            except self.tk.TclError:
+                pass
+        elif isinstance(widget, self.tk.Canvas):
+            try:
+                widget.configure(background=self._panel_background)
+            except self.tk.TclError:
+                pass
+        try:
+            children = widget.winfo_children()
+        except (AttributeError, self.tk.TclError):
+            return
+        for child in children:
+            self._apply_text_palette(child)
+
+    def _semantic_color(self, kind: str) -> str:
+        """Return readable review colours for the current contrast mode."""
+        if self.ui_preferences.high_contrast:
+            return {"warning": "#ffd800", "before": "#ffb3b3", "after": "#8cffad"}[kind]
+        return {"warning": "#8a4b08", "before": "#7a1111", "after": "#176b36"}[kind]
+
+    def _save_view_preferences(self, large_text: bool, high_contrast: bool, status: object) -> None:
+        """Persist and immediately apply accessibility settings."""
+        self.ui_preferences = UiPreferences(large_text=large_text, high_contrast=high_contrast)
+        self._apply_view_preferences()
+        try:
+            save_ui_preferences(self.ui_preferences)
+        except OSError:
+            status.configure(text="Ansicht aktiv; Speichern war nicht möglich.")
+        else:
+            status.configure(text="Ansicht gespeichert ✓")
 
     def _bind_shortcut(self, sequence: str, action: object) -> None:
         def invoke(_event: object) -> str:
@@ -613,7 +717,7 @@ class DesktopApp:
         self.ttk.Label(
             outer,
             text=f"TextVerbessern {__version__}",
-            font=("Segoe UI", 17, "bold"),
+            font=self.dialog_title_font,
         ).pack(anchor="w")
         self.ttk.Label(
             outer,
@@ -625,7 +729,7 @@ class DesktopApp:
             if self.mistral_ready
             else "Schnelle lokale Bearbeitung ist verfügbar; Mistral ist optional."
         )
-        self.ttk.Label(outer, text=model_text, font=("Segoe UI", 10, "bold")).pack(anchor="w")
+        self.ttk.Label(outer, text=model_text, font=self.hint_bold_font).pack(anchor="w")
         self.ttk.Label(
             outer,
             text=(
@@ -640,7 +744,23 @@ class DesktopApp:
             text=f"Tastatur: {shortcut_text}",
             wraplength=560,
         ).pack(anchor="w", pady=(0, 8))
-        report = self.tk.Text(outer, height=10, wrap="word", font=("Consolas", 9), relief="solid", borderwidth=1)
+        view = self.ttk.LabelFrame(outer, text="Ansicht", padding=(12, 8))
+        view.pack(fill="x", pady=(0, 10))
+        large_text = self.tk.BooleanVar(value=self.ui_preferences.large_text)
+        high_contrast = self.tk.BooleanVar(value=self.ui_preferences.high_contrast)
+        self.ttk.Checkbutton(view, text="Größere Schrift", variable=large_text).pack(side="left")
+        self.ttk.Checkbutton(view, text="Hoher Kontrast", variable=high_contrast).pack(side="left", padx=(18, 0))
+        view_status = self.ttk.Label(view, text="", style="Hint.TLabel")
+        view_status.pack(side="right", padx=(8, 0))
+        self.ttk.Button(
+            view,
+            text="Übernehmen",
+            command=lambda: self._save_view_preferences(
+                bool(large_text.get()), bool(high_contrast.get()), view_status
+            ),
+            style="Secondary.TButton",
+        ).pack(side="right")
+        report = self.tk.Text(outer, height=8, wrap="word", font=self.mono_font, relief="solid", borderwidth=1)
         report.insert("1.0", self.support_text())
         report.configure(state="disabled")
         report.pack(fill="both", expand=True, pady=(0, 12))
@@ -654,6 +774,7 @@ class DesktopApp:
             style="Primary.TButton",
         )
         copy_button.pack(side="right", padx=(0, 8))
+        self._apply_text_palette(window)
         window.focus_set()
 
     def _copy_support_info(self, button: object) -> None:
@@ -702,8 +823,8 @@ class DesktopApp:
         self.ttk.Label(
             summary_frame,
             text=summary.title,
-            font=("Segoe UI", 11, "bold"),
-            foreground="#8a4b08" if summary.level == "review" else "#176b36",
+            font=self.body_bold_font,
+            foreground=self._semantic_color("warning" if summary.level == "review" else "after"),
         ).pack(anchor="w")
         self.ttk.Label(summary_frame, text=summary.message, wraplength=980).pack(anchor="w", pady=(3, 0))
         self.ttk.Label(summary_frame, text=summary.checked_values, style="Hint.TLabel").pack(
@@ -714,27 +835,35 @@ class DesktopApp:
         self.ttk.Label(
             outer,
             text=f"{preview.change_groups} Änderungsbereich(e) · Rot = vorher · Grün = nachher",
-            font=("Segoe UI", 11, "bold"),
+            font=self.body_bold_font,
         ).pack(anchor="w", pady=(0, 10))
         columns = self.ttk.Frame(outer)
         columns.pack(fill="both", expand=True)
         columns.columnconfigure(0, weight=1)
         columns.columnconfigure(1, weight=1)
         columns.rowconfigure(1, weight=1)
-        self.ttk.Label(columns, text="Original", font=("Segoe UI", 10, "bold")).grid(
+        self.ttk.Label(columns, text="Original", font=self.hint_bold_font).grid(
             row=0, column=0, sticky="w", padx=(0, 6)
         )
-        self.ttk.Label(columns, text="Verbesserung", font=("Segoe UI", 10, "bold")).grid(
+        self.ttk.Label(columns, text="Verbesserung", font=self.hint_bold_font).grid(
             row=0, column=1, sticky="w", padx=(6, 0)
         )
-        original_box = self.scrolledtext.ScrolledText(columns, wrap="word", font=("Segoe UI", 10))
-        rewritten_box = self.scrolledtext.ScrolledText(columns, wrap="word", font=("Segoe UI", 10))
+        original_box = self.scrolledtext.ScrolledText(columns, wrap="word", font=self.hint_font)
+        rewritten_box = self.scrolledtext.ScrolledText(columns, wrap="word", font=self.hint_font)
         original_box.grid(row=1, column=0, sticky="nsew", padx=(0, 6), pady=(5, 10))
         rewritten_box.grid(row=1, column=1, sticky="nsew", padx=(6, 0), pady=(5, 10))
         original_box.insert("1.0", source)
         rewritten_box.insert("1.0", rewritten)
-        original_box.tag_configure("changed", background="#ffd9d9", foreground="#7a1111")
-        rewritten_box.tag_configure("changed", background="#d9f5df", foreground="#145c2c")
+        original_box.tag_configure(
+            "changed",
+            background="#5c1111" if self.ui_preferences.high_contrast else "#ffd9d9",
+            foreground=self._semantic_color("before"),
+        )
+        rewritten_box.tag_configure(
+            "changed",
+            background="#124522" if self.ui_preferences.high_contrast else "#d9f5df",
+            foreground=self._semantic_color("after"),
+        )
         for start, end in preview.original_ranges:
             original_box.tag_add("changed", f"1.0 + {start} chars", f"1.0 + {end} chars")
         for start, end in preview.rewritten_ranges:
@@ -762,6 +891,7 @@ class DesktopApp:
                 text="Änderungen einzeln auswählen",
                 command=lambda: (window.destroy(), self.open_individual_changes(source, rewritten)),
             ).pack(side="left")
+        self._apply_text_palette(window)
         window.focus_set()
 
     @staticmethod
@@ -786,7 +916,7 @@ class DesktopApp:
         self.ttk.Label(
             outer,
             text="Welche Verbesserungen möchtest du übernehmen?",
-            font=("Segoe UI", 14, "bold"),
+            font=self.dialog_title_font,
         ).pack(anchor="w")
         self.ttk.Label(
             outer,
@@ -822,10 +952,14 @@ class DesktopApp:
             ).pack(anchor="w")
             before = self._change_excerpt(segment.before, empty="[wird eingefügt]")
             after = self._change_excerpt(segment.after, empty="[wird entfernt]")
-            self.ttk.Label(item, text=f"Vorher: {before}", wraplength=720, foreground="#7a1111").pack(
+            self.ttk.Label(
+                item, text=f"Vorher: {before}", wraplength=720, foreground=self._semantic_color("before")
+            ).pack(
                 anchor="w", padx=(24, 0)
             )
-            self.ttk.Label(item, text=f"Nachher: {after}", wraplength=720, foreground="#176b36").pack(
+            self.ttk.Label(
+                item, text=f"Nachher: {after}", wraplength=720, foreground=self._semantic_color("after")
+            ).pack(
                 anchor="w", padx=(24, 0)
             )
 
@@ -843,6 +977,7 @@ class DesktopApp:
             ),
             style="Primary.TButton",
         ).pack(side="right", padx=(0, 8))
+        self._apply_text_palette(window)
         window.focus_set()
 
     def _apply_individual_changes(
