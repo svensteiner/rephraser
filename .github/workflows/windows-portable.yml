@@ -17,6 +17,7 @@ permissions:
 jobs:
   build-windows:
     runs-on: windows-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -91,6 +92,51 @@ jobs:
             files = @($files)
           } | ConvertTo-Json -Depth 5 | Set-Content portable\release-manifest.json -Encoding UTF8
           Compress-Archive -Path portable\* -DestinationPath TextVerbessern-Windows.zip -Force
+      - name: Verify exact downloadable archive
+        shell: pwsh
+        run: |
+          Expand-Archive -LiteralPath TextVerbessern-Windows.zip -DestinationPath archive-check
+          $root = (Resolve-Path archive-check).Path
+          $manifestPath = Join-Path $root 'release-manifest.json'
+          $manifest = Get-Content -Raw -Encoding UTF8 -LiteralPath $manifestPath | ConvertFrom-Json
+          $expectedVersion = python -c "from app import __version__; print(__version__)"
+          if ($manifest.version -ne $expectedVersion) {
+            throw "Archive version mismatch: $($manifest.version) != $expectedVersion"
+          }
+          if ($manifest.commit -ne $env:GITHUB_SHA) {
+            throw "Archive commit mismatch: $($manifest.commit) != $env:GITHUB_SHA"
+          }
+          foreach ($entry in $manifest.files) {
+            $relative = [string]$entry.path
+            $components = $relative -split '[/\\]'
+            if ([IO.Path]::IsPathRooted($relative) -or '..' -in $components -or $relative.Contains(':')) {
+              throw "Unsafe manifest path: $relative"
+            }
+            $candidate = [IO.Path]::GetFullPath((Join-Path $root $relative))
+            if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+              throw "Archive file missing: $relative"
+            }
+            $file = Get-Item -LiteralPath $candidate
+            if ($file.Length -ne [long]$entry.bytes) {
+              throw "Archive size mismatch: $relative"
+            }
+            $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $candidate).Hash.ToLowerInvariant()
+            if ($hash -ne [string]$entry.sha256) {
+              throw "Archive hash mismatch: $relative"
+            }
+          }
+          foreach ($required in @('TextVerbessern.exe', 'VERSION.txt', 'STARTEN.txt', 'SCHNELLSTART.md')) {
+            if (-not (Test-Path -LiteralPath (Join-Path $root $required) -PathType Leaf)) {
+              throw "Required download file missing: $required"
+            }
+          }
+          $exePath = Join-Path $root 'TextVerbessern.exe'
+          $process = Start-Process -FilePath $exePath -ArgumentList '--self-test' -PassThru -WindowStyle Hidden
+          if (-not $process.WaitForExit(30000)) {
+            $process.Kill()
+            throw 'Extracted application self-test timed out'
+          }
+          if ($process.ExitCode -ne 0) { throw 'Extracted application self-test failed' }
       - uses: actions/upload-artifact@v4
         with:
           name: TextVerbessern-Windows
@@ -115,4 +161,21 @@ jobs:
               --prerelease `
               --title "Text verbessern – aktueller Windows-Download" `
               --notes "Portable, lokale Windows-Version. Keine Installation und kein Cloud-Fallback."
+          }
+      - name: Verify published stable download
+        if: github.ref == 'refs/heads/main'
+        timeout-minutes: 5
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force published-check | Out-Null
+          gh release download portable-latest `
+            --pattern TextVerbessern-Windows.zip `
+            --dir published-check `
+            --clobber
+          $localHash = (Get-FileHash -Algorithm SHA256 -LiteralPath TextVerbessern-Windows.zip).Hash
+          $publishedHash = (Get-FileHash -Algorithm SHA256 -LiteralPath published-check\TextVerbessern-Windows.zip).Hash
+          if ($publishedHash -ne $localHash) {
+            throw "Published download hash mismatch: $publishedHash != $localHash"
           }

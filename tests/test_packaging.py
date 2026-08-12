@@ -32,6 +32,14 @@ def test_release_workflow_packages_entire_folder_and_manifest() -> None:
     assert "Copy-Item dist\\TextVerbessern\\* portable -Recurse -Force" in workflow
     assert "release-manifest.json" in workflow
     assert "Get-FileHash -Algorithm SHA256" in workflow
+    assert "Verify exact downloadable archive" in workflow
+    assert "[IO.Path]::IsPathRooted" in workflow
+    assert "'..' -in $components" in workflow
+    assert "Archive hash mismatch" in workflow
+    assert "Extracted application self-test" in workflow
+    assert "Verify published stable download" in workflow
+    assert "Published download hash mismatch" in workflow
+    assert "timeout-minutes: 20" in workflow
 
 
 def test_ci_runs_quality_gate_for_every_supported_python_version() -> None:
