@@ -17,6 +17,10 @@ lokal und typischerweise in deutlich unter einer Sekunde. Wirkungslose Optionen 
 nicht angeboten. Nach der Bearbeitung öffnet **Änderungen ansehen** eine optionale
 Gegenüberstellung: Rot markiert die frühere, Grün die neue Formulierung. Dort kann mit
 einem Klick das Original oder die Verbesserung als kopierbare Fassung ausgewählt werden.
+Eine verständliche Inhaltsprüfung nennt den tatsächlich geprüften Umfang und zeigt klar,
+ob keine überwachte Abweichung gefunden, eine unsichere Fassung automatisch verworfen
+oder eine Stelle manuell zu kontrollieren ist. Sie weist ausdrücklich darauf hin, dass
+wichtige Texte weiterhin selbst gelesen werden sollten.
 Während einer gründlichen Mistral-Bearbeitung liefert **Sichere Fassung jetzt** ohne
 weiteres Warten die lokale Schnellbearbeitung.
 

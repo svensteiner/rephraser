@@ -19,7 +19,7 @@ from .rewrite import rewrite_text
 from .semantic import extract_semantics
 from .validation import validate_preservation
 
-PIPELINE_VERSION = "1.6.0"
+PIPELINE_VERSION = "1.6.1"
 
 
 def _code_points(value: str) -> list[str]:

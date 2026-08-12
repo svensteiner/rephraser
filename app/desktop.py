@@ -12,9 +12,10 @@ import time
 from app.change_preview import build_change_preview
 from app.local_runtime import LOCAL_MODEL_MAX_CHARACTERS, local_mistral_ready, local_model_eligible
 from app.diagnostics import write_diagnostic_event
-from app.models import TransformOptions
+from app.models import AuditReport, TransformOptions
 from app.pipeline import run_pipeline
 from app.providers.base import ProviderError
+from app.review_summary import build_review_summary
 from app.ui_state import classify_result_state, result_actions_allowed
 
 
@@ -94,6 +95,7 @@ class DesktopApp:
         self.mistral_ready = local_mistral_ready()
         self.processed_source: str | None = None
         self.generated_result = ""
+        self.last_audit: AuditReport | None = None
         self.busy = False
         self.processing_active = False
         self.processing_started = 0.0
@@ -384,6 +386,7 @@ class DesktopApp:
         self.output_text.insert("1.0", rewritten)
         self.processed_source = source
         self.generated_result = rewritten
+        self.last_audit = result.audit
         self.copy_button.configure(state="normal")
         self.changes_button.configure(state="normal" if changed else "disabled")
         self.copy_button.focus_set()
@@ -450,6 +453,9 @@ class DesktopApp:
             )
             return
         rewritten = self.generated_result
+        if self.last_audit is None:
+            self.messagebox.showinfo("Prüfung nicht verfügbar", "Bitte den Text erneut bearbeiten.")
+            return
         if max(len(source), len(rewritten)) > CHANGE_PREVIEW_MAX_CHARACTERS:
             self.messagebox.showinfo(
                 "Text sehr lang",
@@ -467,6 +473,24 @@ class DesktopApp:
 
         outer = self.ttk.Frame(window, padding=18)
         outer.pack(fill="both", expand=True)
+        summary = build_review_summary(
+            self.last_audit.semantic_constraints,
+            self.last_audit.fact_preservation_warnings,
+        )
+        summary_frame = self.ttk.LabelFrame(outer, text="Inhaltsprüfung", padding=10)
+        summary_frame.pack(fill="x", pady=(0, 12))
+        self.ttk.Label(
+            summary_frame,
+            text=summary.title,
+            font=("Segoe UI", 11, "bold"),
+            foreground="#8a4b08" if summary.level == "review" else "#176b36",
+        ).pack(anchor="w")
+        self.ttk.Label(summary_frame, text=summary.message, wraplength=980).pack(anchor="w", pady=(3, 0))
+        self.ttk.Label(summary_frame, text=summary.checked_values, style="Hint.TLabel").pack(
+            anchor="w", pady=(5, 0)
+        )
+        for notice in summary.notices:
+            self.ttk.Label(summary_frame, text=f"• {notice}", wraplength=980).pack(anchor="w", pady=(2, 0))
         self.ttk.Label(
             outer,
             text=f"{preview.change_groups} Änderungsbereich(e) · Rot = vorher · Grün = nachher",
@@ -568,6 +592,7 @@ class DesktopApp:
         self.changes_button.configure(state="disabled")
         self.processed_source = None
         self.generated_result = ""
+        self.last_audit = None
         if self.result_visible:
             self.result_line.pack_forget()
             self.output_text.pack_forget()
