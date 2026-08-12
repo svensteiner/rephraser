@@ -8,6 +8,7 @@ import queue
 import sys
 import threading
 import time
+import webbrowser
 
 from app.change_preview import ChangeSegment, apply_change_selection, build_change_preview, build_change_segments
 from app.local_runtime import LOCAL_MODEL_MAX_CHARACTERS, local_mistral_ready, local_model_eligible
@@ -28,6 +29,7 @@ MODE_AUTOMATIC = "Schnell verbessern (empfohlen)"
 MODE_SAFE = "Nur Format bereinigen"
 MODE_STRONG = "Gründlich mit Mistral (bis 45 s)"
 MODEL_UI_DEADLINE_SECONDS = 45.0
+RELEASE_PAGE_URL = "https://github.com/svensteiner/rephraser/releases/tag/portable-latest"
 MAX_CHARACTERS = 2_000_000
 CHANGE_PREVIEW_MAX_CHARACTERS = 200_000
 INDIVIDUAL_CHANGE_MAX_GROUPS = 100
@@ -364,6 +366,12 @@ class DesktopApp:
         """Persist and immediately apply accessibility settings."""
         self.ui_preferences = UiPreferences(large_text=large_text, high_contrast=high_contrast)
         self._apply_view_preferences()
+        try:
+            window = status.winfo_toplevel()
+            if window is not self.root and window.title() == "Info & Hilfe":
+                self._size_help_window(window)
+        except (AttributeError, self.tk.TclError):
+            pass
         try:
             save_ui_preferences(self.ui_preferences)
         except OSError:
@@ -848,8 +856,7 @@ class DesktopApp:
     def open_help(self) -> None:
         window = self.tk.Toplevel(self.root)
         window.title("Info & Hilfe")
-        window.geometry("620x500")
-        window.minsize(540, 440)
+        self._size_help_window(window)
         window.transient(self.root)
         outer = self.ttk.Frame(window, padding=22)
         outer.pack(fill="both", expand=True)
@@ -899,12 +906,13 @@ class DesktopApp:
             ),
             style="Secondary.TButton",
         ).pack(side="right")
-        report = self.tk.Text(outer, height=8, wrap="word", font=self.mono_font, relief="solid", borderwidth=1)
-        report.insert("1.0", self.support_text())
-        report.configure(state="disabled")
-        report.pack(fill="both", expand=True, pady=(0, 12))
         actions = self.ttk.Frame(outer)
-        actions.pack(fill="x")
+        actions.pack(side="bottom", fill="x")
+        self.ttk.Button(
+            actions,
+            text="Aktuelle Version auf GitHub",
+            command=self.open_release_page,
+        ).pack(side="left")
         self.ttk.Button(actions, text="Schließen", command=window.destroy).pack(side="right")
         copy_button = self.ttk.Button(
             actions,
@@ -913,8 +921,33 @@ class DesktopApp:
             style="Primary.TButton",
         )
         copy_button.pack(side="right", padx=(0, 8))
+        report = self.tk.Text(outer, height=8, wrap="word", font=self.mono_font, relief="solid", borderwidth=1)
+        report.insert("1.0", self.support_text())
+        report.configure(state="disabled")
+        report.pack(fill="both", expand=True, pady=(0, 12))
         self._apply_text_palette(window)
         window.focus_set()
+
+    def _size_help_window(self, window: object) -> None:
+        """Keep every help action visible at the selected font size."""
+        if self.ui_preferences.large_text:
+            window.minsize(700, 650)
+            window.geometry("700x650")
+        else:
+            window.minsize(540, 440)
+            window.geometry("620x500")
+
+    def open_release_page(self) -> None:
+        """Open the public release page only after an explicit user action."""
+        try:
+            opened = webbrowser.open(RELEASE_PAGE_URL, new=2)
+        except (OSError, webbrowser.Error):
+            opened = False
+        if not opened:
+            self.messagebox.showinfo(
+                "GitHub nicht geöffnet",
+                "Bitte diese Adresse im Browser öffnen:\n\n" + RELEASE_PAGE_URL,
+            )
 
     def _copy_support_info(self, button: object) -> None:
         self.root.clipboard_clear()

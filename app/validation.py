@@ -109,7 +109,9 @@ def validate_preservation(original: str, rewritten: str, constraints: SemanticCo
             if value not in rewritten:
                 warnings.append(ValidationWarning(kind=f"missing_{kind}", severity="high", value=value,
                     message=f"Original {kind.replace('_', ' ')} is absent or changed in the rewrite."))
-            elif kind in {"number", "date", "citation", "quotation", "protected_term"} and original.count(value) != rewritten.count(value):
+            elif kind in {
+                "number", "date", "proper_name", "citation", "quotation", "protected_term"
+            } and original.count(value) != rewritten.count(value):
                 warnings.append(ValidationWarning(
                     kind=f"altered_{kind}_count",
                     severity="high",

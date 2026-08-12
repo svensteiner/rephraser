@@ -52,6 +52,9 @@ außerdem **Größere Schrift** und **Hoher Kontrast** aktiviert werden. Diese b
 Ansichtseinstellungen gelten sofort für Eingabe, Ergebnis und Prüffenster und werden
 ohne Administratorrechte lokal unter `%LOCALAPPDATA%` gespeichert. Die Einstellungsdatei
 enthält keinerlei Text- oder Dokumentdaten.
+**Aktuelle Version auf GitHub** öffnet die öffentliche Release-Seite ausschließlich nach
+einem bewussten Klick. Es gibt keine automatische Update-Abfrage und dabei werden keine
+Text- oder Dokumentinhalte übertragen.
 
 Die Browser-Oberfläche zeigt nach der Bearbeitung **Original und Ergebnis nebeneinander**.
 Unter **Bearbeitung anpassen** lassen sich Sprache sowie der exakte Schutz von Zahlen,
@@ -229,3 +232,23 @@ Markdown preservation and a single reviewed result rather than many candidate se
 
 - [Parrot Paraphraser (Apache-2.0)](https://github.com/PrithivirajDamodaran/Parrot_Paraphraser)
 - [RasaHQ Paraphraser](https://github.com/RasaHQ/paraphraser)
+
+Eine aktuelle Sichtung weiterer freier Schreibwerkzeuge bestätigt die bewusst einfache
+Produktoberfläche. WritingTools zeigt den Wert eines schnellen Auswahl-, Tastenkürzel- und
+Rückgängig-Workflows. Harper steht für sofortige, konkrete lokale Prüfhilfen und Vale für
+regelbasierte, Markdown-bewusste Stilprüfungen. Talkpipe Writing Assistant unterstreicht außerdem,
+dass Schreibaufgaben als verständliche Modi statt als frei zu formulierende Prompts angeboten
+werden sollten. Ollama bleibt die schlanke lokale Schnittstelle zum bereits vorhandenen Mistral.
+Diese Ideen werden nur als Produktmuster verwendet; es wurde kein Quellcode aus den Projekten
+übernommen. Insbesondere wird kein GPL-Code aus WritingTools kopiert.
+
+- [WritingTools (GPL-3.0)](https://github.com/theJayTea/WritingTools)
+- [Harper (Apache-2.0)](https://github.com/Automattic/harper)
+- [Vale (MIT)](https://github.com/vale-cli/vale)
+- [Talkpipe Writing Assistant (Apache-2.0)](https://github.com/sandialabs/talkpipe-writing-assistant)
+- [Ollama (MIT)](https://github.com/ollama/ollama)
+
+Nicht übernommen werden reine Synonym-Ersetzung, nur englischsprachige T5-Demos, automatische
+Cloud-Fallbacks oder Funktionen, die das Umgehen von AI-Erkennung versprechen. Mehrere generierte
+Varianten sind ebenfalls nicht der Standard: Für sensible Geschäftstexte ist ein geprüfter,
+nachvollziehbarer Vorschlag verständlicher und reduziert die Gefahr unbemerkter Bedeutungsänderungen.

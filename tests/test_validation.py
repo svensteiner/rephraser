@@ -42,6 +42,13 @@ def test_duplicate_protected_fact_is_rejected() -> None:
     assert any(w.kind == "altered_number_count" for w in warnings)
 
 
+def test_duplicate_proper_name_is_rejected() -> None:
+    original = "Anna Müller genehmigte den Bericht."
+    rewritten = "Anna Müller genehmigte den Bericht für Anna Müller."
+    warnings = validate_preservation(original, rewritten, extract_semantics(original))
+    assert any(w.kind == "altered_proper_name_count" and w.value == "Anna Müller" for w in warnings)
+
+
 def test_explicit_protected_term_must_remain_exact_and_keep_its_count() -> None:
     original = "Project Aurora gehört zu Project Aurora Holding."
     constraints = extract_semantics(original, ["Project Aurora"])

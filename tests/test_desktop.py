@@ -8,6 +8,7 @@ from app.desktop import (
     primary_action_label,
     processing_settings,
     request_is_current,
+    RELEASE_PAGE_URL,
     result_is_current,
     run_self_test,
 )
@@ -330,6 +331,56 @@ def test_copy_support_info_uses_metadata_report_only() -> None:
 
     assert clipboard == ["Version 1.7.1\nkein Eingabetext"]
     assert button.values["text"] == "Kopiert ✓"
+
+
+def test_release_page_opens_only_when_user_invokes_action(monkeypatch) -> None:
+    from app.desktop import DesktopApp
+
+    opened = []
+    app = DesktopApp.__new__(DesktopApp)
+    app.messagebox = object()
+    monkeypatch.setattr("app.desktop.webbrowser.open", lambda url, new: opened.append((url, new)) or True)
+
+    app.open_release_page()
+
+    assert opened == [(RELEASE_PAGE_URL, 2)]
+
+
+def test_release_page_failure_shows_copyable_url(monkeypatch) -> None:
+    from app.desktop import DesktopApp
+
+    messages = []
+
+    class MessageBox:
+        def showinfo(self, title, message):
+            messages.append((title, message))
+
+    app = DesktopApp.__new__(DesktopApp)
+    app.messagebox = MessageBox()
+    monkeypatch.setattr("app.desktop.webbrowser.open", lambda url, new: False)
+
+    app.open_release_page()
+
+    assert messages == [("GitHub nicht geöffnet", "Bitte diese Adresse im Browser öffnen:\n\n" + RELEASE_PAGE_URL)]
+
+
+def test_help_window_is_large_enough_for_accessibility_controls() -> None:
+    from app.desktop import DesktopApp
+    from app.ui_preferences import UiPreferences
+
+    calls = []
+
+    class Window:
+        def minsize(self, width, height):
+            calls.append(("minsize", width, height))
+
+        def geometry(self, geometry):
+            calls.append(("geometry", geometry))
+
+    app = DesktopApp.__new__(DesktopApp)
+    app.ui_preferences = UiPreferences(large_text=True, high_contrast=False)
+    app._size_help_window(Window())
+    assert calls == [("minsize", 700, 650), ("geometry", "700x650")]
 
 
 def test_individual_change_selection_is_revalidated_and_applied() -> None:

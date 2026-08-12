@@ -56,6 +56,13 @@ class NameContextSwapStub(EditorialProvider):
         return "Bernd Klein approved the audit; Anna Müller rejected the proposal."
 
 
+class NameDuplicatingStub(EditorialProvider):
+    name = "mistral-test"
+
+    def rewrite(self, text, constraints, options):
+        return text + " Anna Müller."
+
+
 def test_rules_preserve_protected_content_and_umlauts() -> None:
     text = ('Es ist wichtig zu beachten, dass Jörg Müller am 31.12.2025 „Grüße“ sagte. '
             'Der Wert war 1.250,50 EUR (12,5 %). https://example.com/x')
@@ -217,6 +224,14 @@ def test_name_context_swap_is_rejected_by_pipeline() -> None:
     assert result.rewritten_text == text
     rejection = next(w for w in result.audit.fact_preservation_warnings if w.kind == "rewrite_rejected")
     assert "reassigned_proper_name_context" in rejection.value
+
+
+def test_duplicated_proper_name_is_rejected_by_pipeline() -> None:
+    text = "Anna Müller genehmigte den Bericht."
+    result = run_pipeline(text, TransformOptions(provider="rules"), provider=NameDuplicatingStub())
+    assert result.rewritten_text == text
+    rejection = next(w for w in result.audit.fact_preservation_warnings if w.kind == "rewrite_rejected")
+    assert "altered_proper_name_count" in rejection.value
 
 
 def test_long_mistral_input_falls_back_with_truthful_reason_without_network(monkeypatch) -> None:
