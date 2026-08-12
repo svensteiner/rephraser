@@ -27,6 +27,10 @@ dann gesperrt, bis **Manuelle Fassung prüfen** keine Abweichung bei den überwa
 Inhalten findet. Die App bezeichnet diesen Schutzcheck ausdrücklich nicht als
 Bedeutungs-Garantie. **Änderungen verwerfen** oder die Escape-Taste stellt jederzeit
 exakt die letzte geprüfte Fassung wieder her.
+Der komplette Hauptablauf ist per Tastatur erreichbar: F1 öffnet die Hilfe, Strg+O eine
+Datei, Strg+Umschalt+V fügt die Zwischenablage ein, Strg+Enter verbessert, Strg+E
+bearbeitet oder prüft das Ergebnis und Strg+Umschalt+C kopiert. Nach einer sicheren
+Entscheidung springt der Fokus direkt auf **Ergebnis kopieren**.
 Eine verständliche Inhaltsprüfung nennt den tatsächlich geprüften Umfang und zeigt klar,
 ob keine überwachte Abweichung gefunden, eine unsichere Fassung automatisch verworfen
 oder eine Stelle manuell zu kontrollieren ist. Sie weist ausdrücklich darauf hin, dass

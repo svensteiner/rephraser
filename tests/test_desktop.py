@@ -1,4 +1,5 @@
 from app.desktop import (
+    KEYBOARD_SHORTCUTS,
     MODE_AUTOMATIC,
     MODE_SAFE,
     MODE_STRONG,
@@ -10,6 +11,36 @@ from app.desktop import (
     result_is_current,
     run_self_test,
 )
+
+
+def test_keyboard_shortcuts_cover_complete_mouse_free_workflow() -> None:
+    assert KEYBOARD_SHORTCUTS == {
+        "F1": "Info & Hilfe",
+        "Strg+O": "Datei öffnen",
+        "Strg+Umschalt+V": "Zwischenablage einfügen",
+        "Strg+Enter": "Text verbessern",
+        "Strg+E": "Ergebnis bearbeiten / prüfen",
+        "Escape": "Manuelle Änderungen verwerfen",
+        "Strg+Umschalt+C": "Ergebnis kopieren",
+    }
+
+
+def test_shortcut_handler_runs_action_and_stops_default_event() -> None:
+    from app.desktop import DesktopApp
+
+    bindings = {}
+    called = []
+
+    class Root:
+        def bind(self, sequence, handler):
+            bindings[sequence] = handler
+
+    app = DesktopApp.__new__(DesktopApp)
+    app.root = Root()
+    app._bind_shortcut("<F1>", lambda: called.append("help"))
+
+    assert bindings["<F1>"](object()) == "break"
+    assert called == ["help"]
 
 
 def test_processing_settings_are_safe_without_mistral() -> None:
@@ -123,9 +154,13 @@ def test_review_choice_replaces_output_and_keeps_generated_version_recoverable()
     class Widget:
         def __init__(self):
             self.values = {}
+            self.focused = False
 
         def configure(self, **values):
             self.values.update(values)
+
+        def focus_set(self):
+            self.focused = True
 
     class Window:
         destroyed = False
@@ -149,6 +184,7 @@ def test_review_choice_replaces_output_and_keeps_generated_version_recoverable()
     assert app.output_text.value == "Original"
     assert app.generated_result == "Verbesserung"
     assert app.copy_button.values["state"] == "normal"
+    assert app.copy_button.focused is True
     assert app.changes_button.values["state"] == "normal"
     assert app.result_status.values["text"] == "Original ausgewählt – bereit zum Kopieren."
     assert window.destroyed is True
@@ -252,9 +288,13 @@ def test_individual_change_selection_is_revalidated_and_applied() -> None:
     class Widget:
         def __init__(self):
             self.values = {}
+            self.focused = False
 
         def configure(self, **values):
             self.values.update(values)
+
+        def focus_set(self):
+            self.focused = True
 
     class Window:
         destroyed = False
@@ -285,6 +325,7 @@ def test_individual_change_selection_is_revalidated_and_applied() -> None:
 
     assert app.output_text.value == "Wir möchten prüfen. Zum jetzigen Zeitpunkt fehlt Beleg 17."
     assert app.copy_button.values["state"] == "normal"
+    assert app.copy_button.focused is True
     assert "Geprüfte Einzelauswahl" in app.result_status.values["text"]
     assert window.destroyed is True
 
@@ -370,9 +411,13 @@ def test_manual_result_edit_requires_successful_recheck_before_copy() -> None:
     class Widget:
         def __init__(self):
             self.values = {}
+            self.focused = False
 
         def configure(self, **values):
             self.values.update(values)
+
+        def focus_set(self):
+            self.focused = True
 
     source = "Der Betrag bleibt 12,5 %."
     result = run_pipeline(source, TransformOptions(provider="rules"))
@@ -402,6 +447,7 @@ def test_manual_result_edit_requires_successful_recheck_before_copy() -> None:
     assert app.manual_result_verified is True
     assert app.output_text.state == "disabled"
     assert app.copy_button.values["state"] == "normal"
+    assert app.copy_button.focused is True
     assert "keine Bedeutungs-Garantie" in app.result_status.values["text"]
 
 
@@ -515,9 +561,13 @@ def test_discard_manual_edits_restores_exact_last_verified_result() -> None:
     class Widget:
         def __init__(self):
             self.values = {}
+            self.focused = False
 
         def configure(self, **values):
             self.values.update(values)
+
+        def focus_set(self):
+            self.focused = True
 
     app = DesktopApp.__new__(DesktopApp)
     app.output_text = TextBox()
@@ -539,5 +589,6 @@ def test_discard_manual_edits_restores_exact_last_verified_result() -> None:
     assert app.output_editing is False
     assert app.manual_result_verified is True
     assert app.copy_button.values["state"] == "normal"
+    assert app.copy_button.focused is True
     assert app.discard_edit_button.values["state"] == "disabled"
     assert "wiederhergestellt" in app.result_status.values["text"]

@@ -28,6 +28,15 @@ MODE_STRONG = "Gründlich mit Mistral (bis 45 s)"
 MAX_CHARACTERS = 2_000_000
 CHANGE_PREVIEW_MAX_CHARACTERS = 200_000
 INDIVIDUAL_CHANGE_MAX_GROUPS = 100
+KEYBOARD_SHORTCUTS = {
+    "F1": "Info & Hilfe",
+    "Strg+O": "Datei öffnen",
+    "Strg+Umschalt+V": "Zwischenablage einfügen",
+    "Strg+Enter": "Text verbessern",
+    "Strg+E": "Ergebnis bearbeiten / prüfen",
+    "Escape": "Manuelle Änderungen verwerfen",
+    "Strg+Umschalt+C": "Ergebnis kopieren",
+}
 
 
 def processing_settings(mode: str, mistral_ready: bool) -> tuple[str, str]:
@@ -234,13 +243,24 @@ class DesktopApp:
         )
         ttk.Label(
             outer,
-            text="Tastatur: Strg+Enter verbessern · Strg+Umschalt+C Ergebnis kopieren",
+            text="Tastatur: Strg+Enter verbessern · Strg+E bearbeiten/prüfen · F1 Hilfe",
             style="Hint.TLabel",
         ).pack(anchor="e", pady=(8, 0))
 
-        self.root.bind("<Control-Return>", lambda _event: self.start_processing())
-        self.root.bind("<Control-Shift-C>", lambda _event: self.copy_result())
+        self._bind_shortcut("<F1>", self.open_help)
+        self._bind_shortcut("<Control-o>", self.open_file)
+        self._bind_shortcut("<Control-Shift-V>", self.paste_clipboard)
+        self._bind_shortcut("<Control-Return>", self.start_processing)
+        self._bind_shortcut("<Control-e>", self.toggle_result_editing)
+        self._bind_shortcut("<Control-Shift-C>", self.copy_result)
         self.input_text.focus_set()
+
+    def _bind_shortcut(self, sequence: str, action: object) -> None:
+        def invoke(_event: object) -> str:
+            action()  # type: ignore[operator]
+            return "break"
+
+        self.root.bind(sequence, invoke)
 
     def _set_source_text(self, content: str) -> None:
         if len(content) > MAX_CHARACTERS:
@@ -528,6 +548,7 @@ class DesktopApp:
             text="Manuelle Fassung geprüft – keine Abweichung bei den überwachten Inhalten gefunden; "
                  "keine Bedeutungs-Garantie."
         )
+        self.copy_button.focus_set()
 
     def discard_manual_edits(self) -> None:
         """Restore the exact last verified result without running another transformation."""
@@ -541,6 +562,7 @@ class DesktopApp:
         self.edit_result_button.configure(state="normal", text="Ergebnis bearbeiten")
         self.discard_edit_button.configure(state="disabled")
         self.result_status.configure(text="Manuelle Änderungen verworfen – letzte geprüfte Fassung wiederhergestellt.")
+        self.copy_button.focus_set()
 
     def _show_error(self, error: Exception, request_id: int) -> None:
         if not request_is_current(request_id, self.active_request_id, self.closed):
@@ -583,8 +605,8 @@ class DesktopApp:
     def open_help(self) -> None:
         window = self.tk.Toplevel(self.root)
         window.title("Info & Hilfe")
-        window.geometry("620x430")
-        window.minsize(540, 380)
+        window.geometry("620x500")
+        window.minsize(540, 440)
         window.transient(self.root)
         outer = self.ttk.Frame(window, padding=22)
         outer.pack(fill="both", expand=True)
@@ -612,6 +634,12 @@ class DesktopApp:
             ),
             wraplength=560,
         ).pack(anchor="w", pady=(14, 8))
+        shortcut_text = " · ".join(f"{key}: {label}" for key, label in KEYBOARD_SHORTCUTS.items())
+        self.ttk.Label(
+            outer,
+            text=f"Tastatur: {shortcut_text}",
+            wraplength=560,
+        ).pack(anchor="w", pady=(0, 8))
         report = self.tk.Text(outer, height=10, wrap="word", font=("Consolas", 9), relief="solid", borderwidth=1)
         report.insert("1.0", self.support_text())
         report.configure(state="disabled")
@@ -844,6 +872,7 @@ class DesktopApp:
         self.edit_result_button.configure(state="normal", text="Ergebnis bearbeiten")
         self.discard_edit_button.configure(state="disabled")
         self.result_status.configure(text="Geprüfte Einzelauswahl übernommen – bereit zum Kopieren.")
+        self.copy_button.focus_set()
         window.destroy()
 
     def _use_reviewed_text(self, text: str, window: object, *, improved: bool) -> None:
@@ -859,6 +888,7 @@ class DesktopApp:
             if improved
             else "Original ausgewählt – bereit zum Kopieren."
         )
+        self.copy_button.focus_set()
         window.destroy()
 
     def copy_result(self) -> None:
