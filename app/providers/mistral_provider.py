@@ -22,6 +22,7 @@ class LocalMistralProvider(EditorialProvider):
 
     name = "mistral-local"
     max_characters = LOCAL_MODEL_MAX_CHARACTERS
+    default_timeout = 42.0
 
     def __init__(self, base_url: str | None = None, model: str | None = None) -> None:
         try:
@@ -32,30 +33,41 @@ class LocalMistralProvider(EditorialProvider):
             raise ProviderError(str(error), code="invalid_local_url") from error
         self.model = model or os.getenv("MISTRAL_MODEL", "mistral")
         try:
-            configured_timeout = float(os.getenv("MISTRAL_TIMEOUT_SECONDS", "45"))
+            configured_timeout = float(os.getenv("MISTRAL_TIMEOUT_SECONDS", str(self.default_timeout)))
         except ValueError:
-            configured_timeout = 45
+            configured_timeout = self.default_timeout
         self.timeout = min(180.0, max(5.0, configured_timeout))
 
     def _request_with_deadline(self, request: urllib.request.Request) -> bytes:
         """Enforce a wall-clock deadline in addition to urllib's idle timeout."""
         completed: queue.Queue[tuple[str, object]] = queue.Queue(maxsize=1)
         active_response: dict[str, object] = {}
+        cancelled = threading.Event()
 
         def request_worker() -> None:
             try:
                 opener = urllib.request.build_opener(NoRedirect)
                 with opener.open(request, timeout=self.timeout) as response:
                     active_response["value"] = response
+                    # A connection can finish just after the caller has reached
+                    # its deadline. Do not begin reading a late response.
+                    if cancelled.is_set():
+                        return
                     raw = response.read(5_000_001)
+                if cancelled.is_set():
+                    return
                 completed.put(("result", raw))
             except Exception as error:
-                completed.put(("error", error))
+                if not cancelled.is_set():
+                    completed.put(("error", error))
 
         worker = threading.Thread(target=request_worker, daemon=True, name="local-mistral-request")
         worker.start()
         worker.join(self.timeout)
         if worker.is_alive():
+            # Set cancellation before inspecting the response to close the race
+            # where ``open`` completes just after the deadline lookup.
+            cancelled.set()
             response = active_response.get("value")
             if response is not None:
                 def close_response() -> None:

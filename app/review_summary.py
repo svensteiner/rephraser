@@ -44,15 +44,15 @@ def _checked_values(constraints: SemanticConstraints) -> str:
 
 def _notice(warning: ValidationWarning) -> str:
     if warning.kind == "provider_timeout":
-        return "Mistral überschritt die Zeitgrenze; geprüft wurde die sichere lokale Ersatzfassung."
+        return "Mistral überschritt die Zeitgrenze; geprüft wurde die sichere lokale Grundbereinigung."
     if warning.kind == "provider_unavailable":
-        return "Mistral war nicht verfügbar; geprüft wurde die sichere lokale Ersatzfassung."
+        return "Mistral war nicht verfügbar; geprüft wurde die sichere lokale Grundbereinigung."
     if warning.kind == "model_input_too_long":
         return "Der Text war für einen Modelldurchlauf zu lang; geprüft wurde die lokale Schnellfassung."
     if warning.kind == "rewrite_rejected":
         return "Eine möglicherweise inhaltlich veränderte Fassung wurde automatisch verworfen."
     if warning.kind == "user_selected_safe_fallback":
-        return "Die sichere lokale Schnellfassung wurde auf Wunsch sofort verwendet."
+        return "Die sichere lokale Grundbereinigung wurde auf Wunsch sofort verwendet."
     if warning.kind == "protected_term_not_found":
         return f"Gewünschter geschützter Begriff nicht im Ausgangstext gefunden: {warning.value}"
     labels = {
@@ -105,7 +105,7 @@ def build_review_summary(
             level="protected",
             title="✓ Unsichere Fassung automatisch verworfen",
             message=(
-                "Angezeigt wird die sichere Ersatzfassung. Die Prüfung hat keine verbleibende "
+                "Angezeigt wird die sichere lokale Grundbereinigung. Die Prüfung hat keine verbleibende "
                 "Abweichung bei den überwachten Inhalten gefunden."
             ),
             checked_values=checked,

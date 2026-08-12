@@ -35,10 +35,16 @@ Eine verständliche Inhaltsprüfung nennt den tatsächlich geprüften Umfang und
 ob keine überwachte Abweichung gefunden, eine unsichere Fassung automatisch verworfen
 oder eine Stelle manuell zu kontrollieren ist. Sie weist ausdrücklich darauf hin, dass
 wichtige Texte weiterhin selbst gelesen werden sollten.
+Vor jeder gründlichen Mistral-Bearbeitung prüft die App die lokale Verbindung nochmals
+höchstens eine halbe Sekunde lang und ohne Textübertragung. Wurde Ollama seit dem Start
+beendet oder ist das Modell nicht mehr bereit, startet sie sofort die sichere lokale
+Grundbereinigung statt auf einen 45-Sekunden-Ablauf zu warten.
 Während einer gründlichen Mistral-Bearbeitung liefert **Sichere Fassung jetzt** ohne
-weiteres Warten die lokale Schnellbearbeitung. Spätestens nach 45 Sekunden wechselt die
-Desktop-App automatisch dorthin, reaktiviert alle Bedienelemente und ignoriert eine
-eventuell später eintreffende Modellantwort.
+weiteres Warten die lokale Grundbereinigung. Spätestens nach 45 Sekunden wechselt die
+Desktop-App automatisch dorthin, reaktiviert alle Bedienelemente und übernimmt eine
+eventuell später eintreffende Modellantwort nicht mehr. Bis die frühere Modellanfrage
+tatsächlich beendet ist, bleibt der gründliche Modus bewusst ausgeblendet; schnelle und
+reine Formatbearbeitung sind weiterhin sofort verfügbar.
 Über **Begriffe schützen …** können optional interne Projekt-, Produkt- oder Kontonamen
 eingetragen werden – ein Begriff pro Zeile. Die App akzeptiert nur Begriffe, die im
 Ausgangstext exakt vorkommen, erhält Schreibweise und Häufigkeit und prüft den Schutz
@@ -206,9 +212,10 @@ that numbers, dates, names, quotations or citations were reassigned between fact
 example, a revenue figure swapped with an operating-profit figure even though both exact numbers
 still appear. Paragraph and Markdown-list boundaries are treated as separate contexts.
 
-Local Mistral calls have both socket limits and a hard wall-clock deadline. If the model is
-unavailable or responds too slowly, the application returns conservative local cleanup and never
-falls back to a cloud service.
+Local Mistral calls have both socket limits and a hard wall-clock deadline. The default model
+deadline is 42 seconds; the desktop app retains a separate 45-second final safety net. If the
+model is unavailable or responds too slowly, the application returns conservative local cleanup
+and never falls back to a cloud service.
 
 The optional single-pass Mistral mode is offered for inputs up to 12,000 characters. Longer
 documents remain fully supported by the fast local editor and safe Unicode/format cleanup; the UI

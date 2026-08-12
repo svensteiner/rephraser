@@ -51,7 +51,7 @@ def test_mistral_requests_reproducible_local_generation(monkeypatch) -> None:
 
     class Opener:
         def open(self, request, timeout):
-            assert timeout == 45
+            assert timeout == 42
             captured.update(json.loads(request.data))
             return Response()
 
@@ -166,6 +166,46 @@ def test_mistral_deadline_covers_connection_or_header_stall(monkeypatch) -> None
 
     assert captured_error.value.code == "provider_timeout"
     assert time.monotonic() - started < 0.5
+
+
+def test_mistral_closes_a_response_that_arrives_just_after_deadline(monkeypatch) -> None:
+    release_open = threading.Event()
+    response_returned = threading.Event()
+    closed = threading.Event()
+
+    class LateResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            self.close()
+
+        def read(self, limit):
+            closed.wait(2)
+            return b'{"response": "too late"}'
+
+        def close(self):
+            closed.set()
+
+    class Opener:
+        def open(self, request, timeout):
+            release_open.wait(1)
+            response_returned.set()
+            return LateResponse()
+
+    monkeypatch.setattr("urllib.request.build_opener", lambda *handlers: Opener())
+    provider = LocalMistralProvider()
+    provider.timeout = 0.05
+    threading.Timer(0.08, release_open.set).start()
+    started = time.monotonic()
+
+    with pytest.raises(ProviderError) as captured_error:
+        provider.rewrite("Ein Satz.", extract_semantics("Ein Satz."), TransformOptions())
+
+    assert captured_error.value.code == "provider_timeout"
+    assert time.monotonic() - started < 0.5
+    assert response_returned.wait(0.5)
+    assert closed.wait(0.5)
 
 
 def test_mistral_deadline_stops_a_real_slow_drip_response() -> None:

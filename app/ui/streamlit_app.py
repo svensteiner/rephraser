@@ -5,8 +5,13 @@ import json
 import streamlit as st
 import streamlit.components.v2 as components
 
-from app.local_runtime import LOCAL_MODEL_MAX_CHARACTERS, local_mistral_ready, local_model_eligible
-from app.models import TransformOptions
+from app.local_runtime import (
+    LOCAL_MODEL_MAX_CHARACTERS,
+    local_mistral_ready,
+    local_model_eligible,
+    preflight_local_mistral,
+)
+from app.models import TransformOptions, ValidationWarning
 from app.protection import missing_protected_terms, normalize_protected_terms
 from app.pipeline import run_pipeline
 from app.providers.base import ProviderError
@@ -176,11 +181,22 @@ action_label = "Text verbessern"
 run = st.button(action_label, type="primary", use_container_width=True,
                 disabled=not st.session_state.source_text.strip() or bool(protection_error))
 if run:
+    requested_thorough_mode = mode_label == "Gründlich mit Mistral (bis 45 s)" and mistral_ready
+    mistral_preflight_failed = False
+    if requested_thorough_mode:
+        with st.spinner("Lokales Mistral wird kurz geprüft …"):
+            mistral_preflight_failed = not preflight_local_mistral()
+        if mistral_preflight_failed:
+            # The cached banner may be up to ten seconds old.  The next rerun must
+            # accurately hide the thorough mode; no pasted text was sent here.
+            cached_local_mistral_ready.clear()
     if mode_label == "Nur Format bereinigen":
         provider, strength = "rules", "light"
-    elif mode_label == "Gründlich mit Mistral (bis 45 s)" and mistral_ready:
+    elif requested_thorough_mode and not mistral_preflight_failed:
         provider = "rules+mistral-local"
         strength = "substantial"
+    elif mistral_preflight_failed:
+        provider, strength = "rules", "light"
     else:
         provider, strength = "fast-editor", "medium"
     options = TransformOptions(
@@ -197,11 +213,27 @@ if run:
     message = (
         "Gründliche lokale Mistral-Überarbeitung läuft – höchstens 45 Sekunden."
         if "mistral" in provider
+        else "Mistral derzeit nicht erreichbar – sichere lokale Fassung wird sofort erstellt."
+        if mistral_preflight_failed
         else "Text wird sofort lokal verbessert."
     )
     with st.spinner(message):
         try:
             st.session_state.result = run_pipeline(st.session_state.source_text, options)
+            if mistral_preflight_failed:
+                st.session_state.result.audit.requested_provider = "rules+mistral-local"
+                # Keep the applied safe-pass settings intact and expose the original
+                # thorough choice separately for a truthful audit trail.
+                st.session_state.result.audit.options["requested_provider"] = "rules+mistral-local"
+                st.session_state.result.audit.options["requested_rewrite_strength"] = "substantial"
+                st.session_state.result.audit.options["fallback_reason"] = "provider_unavailable"
+                st.session_state.result.audit.fact_preservation_warnings.append(ValidationWarning(
+                    kind="provider_unavailable",
+                    severity="medium",
+                    value="streamlit_mistral_preflight",
+                    message=("Das lokale Mistral war vor der Bearbeitung nicht erreichbar; "
+                             "ausgegeben wurde die sichere lokale Grundbereinigung."),
+                ))
             st.session_state.result_source = st.session_state.source_text
             st.session_state.original_preview = st.session_state.source_text
             st.session_state.editable_result = st.session_state.result.rewritten_text
@@ -219,7 +251,7 @@ if run:
             ):
                 st.session_state.processing_note = "Text war für Mistral zu lang; vollständig lokal schnell bearbeitet."
             elif provider_fallback:
-                st.session_state.processing_note = "Mistral war nicht rechtzeitig verfügbar; sicher bereinigt."
+                st.session_state.processing_note = "Mistral war nicht verfügbar; sichere lokale Grundbereinigung angezeigt."
             elif was_rejected:
                 st.session_state.processing_note = "Lokal sicher bereinigt; die Modellfassung wurde verworfen."
             elif st.session_state.result.rewritten_text == st.session_state.source_text:
@@ -274,7 +306,7 @@ if result is not None:
     elif "provider_timeout" in warning_kinds:
         st.warning("Mistral hat die Zeitgrenze erreicht. Das sicher bereinigte Ergebnis wird angezeigt.")
     elif "provider_unavailable" in warning_kinds:
-        st.warning("Mistral war nicht rechtzeitig verfügbar. Das sicher bereinigte Ergebnis wird angezeigt.")
+        st.warning("Mistral war nicht verfügbar. Die sichere lokale Grundbereinigung wird angezeigt.")
     elif "rewrite_rejected" in warning_kinds:
         st.warning("Die sprachliche Fassung wurde vorsichtshalber verworfen. Der sicher bereinigte Text wird angezeigt.")
     elif warning_count:

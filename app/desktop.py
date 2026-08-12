@@ -11,7 +11,12 @@ import time
 import webbrowser
 
 from app.change_preview import ChangeSegment, apply_change_selection, build_change_preview, build_change_segments
-from app.local_runtime import LOCAL_MODEL_MAX_CHARACTERS, local_mistral_ready, local_model_eligible
+from app.local_runtime import (
+    LOCAL_MODEL_MAX_CHARACTERS,
+    local_mistral_ready,
+    local_model_eligible,
+    preflight_local_mistral,
+)
 from app import __version__
 from app.diagnostics import diagnostic_log_path, write_diagnostic_event
 from app.models import AuditReport, TransformOptions, ValidationWarning
@@ -39,7 +44,7 @@ KEYBOARD_SHORTCUTS = {
     "Strg+Umschalt+V": "Zwischenablage einfügen",
     "Strg+Enter": "Text verbessern",
     "Strg+E": "Ergebnis bearbeiten / prüfen",
-    "Escape": "Manuelle Änderungen verwerfen",
+    "Escape": "Sichere Fassung / manuelle Änderungen verwerfen",
     "Strg+Umschalt+C": "Ergebnis kopieren",
 }
 
@@ -62,6 +67,15 @@ def available_modes(mistral_ready: bool) -> tuple[str, ...]:
 
 def primary_action_label(mistral_ready: bool) -> str:
     return "Text verbessern"
+
+
+def system_status_text(mistral_ready: bool, model_request_inflight: bool = False) -> str:
+    """Describe only local capabilities that can be used right now."""
+    if model_request_inflight:
+        return "✓ Schnelle lokale Bearbeitung bereit; Mistral beendet noch eine frühere Anfrage."
+    if mistral_ready:
+        return "✓ Sofortige Textverbesserung bereit; Mistral ist zusätzlich verfügbar."
+    return "✓ Sofortige lokale Textverbesserung bereit; Mistral ist optional."
 
 
 def result_is_current(source: str, processed_source: str | None, result: str, busy: bool) -> bool:
@@ -130,6 +144,7 @@ class DesktopApp:
         self.processing_active = False
         self.processing_started = 0.0
         self.active_request_id = 0
+        self.model_request_inflight_id: int | None = None
         self.closed = False
         self.ui_events: queue.Queue[tuple[object, tuple[object, ...]]] = queue.Queue()
         self.root.protocol("WM_DELETE_WINDOW", self._close)
@@ -148,12 +163,9 @@ class DesktopApp:
             style="Hint.TLabel",
         ).pack(anchor="w", pady=(2, 12))
 
-        status_text = (
-            "✓ Sofortige Textverbesserung bereit; Mistral ist zusätzlich verfügbar."
-            if self.mistral_ready
-            else "✓ Sofortige lokale Textverbesserung bereit; Mistral ist optional."
+        self.system_status = ttk.Label(
+            outer, text=system_status_text(self.mistral_ready), style="Status.TLabel"
         )
-        self.system_status = ttk.Label(outer, text=status_text, style="Status.TLabel")
         self.system_status.pack(fill="x", pady=(0, 12))
 
         top_line = ttk.Frame(outer)
@@ -229,7 +241,6 @@ class DesktopApp:
         self.output_text = scrolledtext.ScrolledText(outer, height=10, wrap="word", font=self.body_font, undo=True)
         self.output_text.configure(state="disabled")
         self.output_text.bind("<<Modified>>", self._output_changed)
-        self.output_text.bind("<Escape>", lambda _event: self.discard_manual_edits())
         self.result_visible = False
 
         self.bottom = ttk.Frame(outer)
@@ -272,6 +283,7 @@ class DesktopApp:
         self._bind_shortcut("<Control-Return>", self.start_processing)
         self._bind_shortcut("<Control-e>", self.toggle_result_editing)
         self._bind_shortcut("<Control-Shift-C>", self.copy_result)
+        self._bind_shortcut("<Escape>", self._handle_escape)
         self._apply_text_palette(self.root)
         self.input_text.focus_set()
 
@@ -489,15 +501,12 @@ class DesktopApp:
         self.source_count.set(
             f"{len(source.split()):,} Wörter · {len(source):,} Zeichen".replace(",", ".")
         )
-        mistral_for_text = local_model_eligible(source, self.mistral_ready)
-        self.mode_box.configure(values=available_modes(mistral_for_text))
-        if self.mode.get() == MODE_STRONG and not mistral_for_text:
-            self.mode.set(MODE_AUTOMATIC)
-            if len(source) > LOCAL_MODEL_MAX_CHARACTERS:
-                self.result_status.configure(
-                    text=(f"Text über {LOCAL_MODEL_MAX_CHARACTERS:,} Zeichen – schnelle lokale Bearbeitung aktiv."
-                          .replace(",", "."))
-                )
+        self._refresh_mistral_controls(source)
+        if len(source) > LOCAL_MODEL_MAX_CHARACTERS and self.mode.get() != MODE_STRONG:
+            self.result_status.configure(
+                text=(f"Text über {LOCAL_MODEL_MAX_CHARACTERS:,} Zeichen – schnelle lokale Bearbeitung aktiv."
+                      .replace(",", "."))
+            )
         if self.processed_source is not None and source != self.processed_source:
             self.copy_button.configure(state="disabled")
             self.changes_button.configure(state="disabled")
@@ -505,6 +514,46 @@ class DesktopApp:
             self.discard_edit_button.configure(state="disabled")
             self.manual_result_verified = False
             self.result_status.configure(text="Ausgangstext geändert – bitte erneut bearbeiten.")
+
+    def _mistral_can_start(self) -> bool:
+        """Do not queue a second model request while a discarded one is still ending."""
+        return self.mistral_ready and getattr(self, "model_request_inflight_id", None) is None
+
+    def _refresh_mistral_controls(self, source: str | None = None) -> None:
+        """Keep the mode selector truthful after model availability changes."""
+        if not all(hasattr(self, name) for name in ("input_text", "mode_box", "mode")):
+            return
+        current_source = source if source is not None else self.input_text.get("1.0", "end-1c")
+        mistral_for_text = local_model_eligible(current_source, self._mistral_can_start())
+        self.mode_box.configure(values=available_modes(mistral_for_text))
+        if self.mode.get() == MODE_STRONG and not mistral_for_text:
+            self.mode.set(MODE_AUTOMATIC)
+
+    def _set_mistral_availability(self, available: bool) -> None:
+        """Update visible local-model state without ever transmitting document text."""
+        self.mistral_ready = available
+        if hasattr(self, "system_status"):
+            self.system_status.configure(
+                text=system_status_text(
+                    available,
+                    getattr(self, "model_request_inflight_id", None) is not None,
+                )
+            )
+        self._refresh_mistral_controls()
+
+    def _model_request_finished(self, request_id: int) -> None:
+        """Allow a new thorough pass only after an ignored model worker has really ended."""
+        if request_id != getattr(self, "model_request_inflight_id", None):
+            return
+        self.model_request_inflight_id = None
+        self._set_mistral_availability(self.mistral_ready)
+
+    def _handle_escape(self) -> None:
+        """Provide a keyboard-safe exit from the two deliberate editing states."""
+        if self.busy and self.processing_active:
+            self.use_safe_result_now()
+        elif self.output_editing:
+            self.discard_manual_edits()
 
     def open_file(self) -> None:
         path = self.filedialog.askopenfilename(filetypes=(("Text und Markdown", "*.txt *.md"), ("Alle Dateien", "*.*")))
@@ -543,6 +592,19 @@ class DesktopApp:
             )
             self.open_protected_terms()
             return
+        selected_mode = self.mode.get()
+        fallback_kind: str | None = None
+        if selected_mode == MODE_STRONG:
+            # Availability may have changed since startup.  This short local-only
+            # preflight sends no document text and avoids an avoidable long wait.
+            self.result_status.configure(text="Lokales Mistral wird kurz geprüft …")
+            try:
+                self.root.update_idletasks()
+            except self.tk.TclError:
+                return
+            if not preflight_local_mistral():
+                self._set_mistral_availability(False)
+                fallback_kind = "provider_unavailable"
         self.run_button.configure(state="disabled", text=primary_action_label(self.mistral_ready))
         self.busy = True
         self.manual_result_verified = False
@@ -550,32 +612,48 @@ class DesktopApp:
         self.input_text.configure(state="disabled")
         self.mode_box.configure(state="disabled")
         self.protected_terms_button.configure(state="disabled")
-        provider, strength = processing_settings(self.mode.get(), self.mistral_ready)
+        provider, strength = (
+            ("rules", "light")
+            if fallback_kind is not None
+            else processing_settings(self.mode.get(), self.mistral_ready)
+        )
         self.progress.start(12)
         self.processing_active = "mistral" in provider
-        if self.processing_active:
-            self.processing_started = time.monotonic()
-            self.run_button.configure(state="normal", text="Sichere Fassung jetzt")
-            self._update_elapsed_time()
-        else:
-            self.result_status.configure(text="Text wird sofort lokal verbessert …")
         self.active_request_id += 1
         request_id = self.active_request_id
+        if self.processing_active:
+            self.processing_started = time.monotonic()
+            self.model_request_inflight_id = request_id
+            self.run_button.configure(state="normal", text="Sichere Fassung jetzt")
+            self.run_button.focus_set()
+            self._update_elapsed_time()
+        elif fallback_kind == "provider_unavailable":
+            self.result_status.configure(
+                text="Mistral derzeit nicht erreichbar – sichere lokale Fassung wird sofort erstellt …"
+            )
+        else:
+            self.result_status.configure(text="Text wird sofort lokal verbessert …")
         thread = threading.Thread(
             target=self._worker,
-            args=(source, provider, strength, request_id, self.protected_terms),
+            args=(source, provider, strength, request_id, self.protected_terms, fallback_kind),
             daemon=True,
         )
-        thread.start()
+        try:
+            thread.start()
+        except RuntimeError as error:
+            if getattr(self, "model_request_inflight_id", None) == request_id:
+                self.model_request_inflight_id = None
+            self._show_error(error, request_id)
 
     def use_safe_result_now(self, *, automatically: bool = False) -> None:
-        """Abandon a slow model result and immediately produce the local fast version."""
+        """Ignore a slow model result and immediately produce deterministic local cleanup."""
         if not self.busy or not self.processing_active:
             return
         source = self.input_text.get("1.0", "end-1c")
         self.active_request_id += 1
         request_id = self.active_request_id
         self.processing_active = False
+        self._set_mistral_availability(self.mistral_ready)
         self.run_button.configure(state="disabled", text=primary_action_label(self.mistral_ready))
         self.result_status.configure(
             text=("Zeitgrenze erreicht – sichere lokale Fassung wird erstellt …"
@@ -585,8 +663,8 @@ class DesktopApp:
             target=self._worker,
             args=(
                 source,
-                "fast-editor",
-                "medium",
+                "rules",
+                "light",
                 request_id,
                 self.protected_terms,
                 "provider_timeout" if automatically else "user_selected_safe_fallback",
@@ -594,7 +672,10 @@ class DesktopApp:
             daemon=True,
             name="safe-editor-fallback",
         )
-        thread.start()
+        try:
+            thread.start()
+        except RuntimeError as error:
+            self._show_error(error, request_id)
 
     def _update_elapsed_time(self) -> None:
         if not self.processing_active:
@@ -618,6 +699,7 @@ class DesktopApp:
         protected_terms: tuple[str, ...] = (),
         fallback_kind: str | None = None,
     ) -> None:
+        model_request = "mistral" in provider
         try:
             options = TransformOptions(
                 provider=provider,
@@ -631,26 +713,42 @@ class DesktopApp:
             result = run_pipeline(source, options)
             if fallback_kind is not None:
                 result.audit.requested_provider = "rules+mistral-local"
-                result.audit.options["provider"] = "rules+mistral-local"
+                # ``options`` documents the deterministic pass that actually ran.
+                # Record the chosen Mistral mode separately so the audit remains
+                # honest about both requested and applied processing.
+                result.audit.options["requested_provider"] = "rules+mistral-local"
+                result.audit.options["requested_rewrite_strength"] = "substantial"
+                result.audit.options["fallback_reason"] = fallback_kind
                 if fallback_kind == "provider_timeout":
                     result.audit.fact_preservation_warnings.append(ValidationWarning(
                         kind="provider_timeout",
                         severity="medium",
                         value="desktop_ui_deadline",
                         message=("Die Desktop-Zeitgrenze wurde erreicht; ausgegeben wurde die "
-                                 "sichere lokale Schnellfassung."),
+                                 "sichere lokale Grundbereinigung."),
+                    ))
+                elif fallback_kind == "provider_unavailable":
+                    result.audit.fact_preservation_warnings.append(ValidationWarning(
+                        kind="provider_unavailable",
+                        severity="medium",
+                        value="desktop_mistral_preflight",
+                        message=("Das lokale Mistral war vor der Bearbeitung nicht erreichbar; "
+                                 "ausgegeben wurde die sichere lokale Grundbereinigung."),
                     ))
                 else:
                     result.audit.fact_preservation_warnings.append(ValidationWarning(
                         kind="user_selected_safe_fallback",
                         severity="medium",
                         value="safe_result_now",
-                        message="Die sichere lokale Schnellfassung wurde manuell gewählt.",
+                        message="Die sichere lokale Grundbereinigung wurde manuell gewählt.",
                     ))
         except Exception as error:  # UI boundary: always return control to the user.
             self._schedule_ui(self._show_error, error, request_id)
-            return
-        self._schedule_ui(self._show_result, result, provider, request_id)
+        else:
+            self._schedule_ui(self._show_result, result, provider, request_id)
+        finally:
+            if model_request:
+                self._schedule_ui(self._model_request_finished, request_id)
 
     def _schedule_ui(self, callback: object, *args: object) -> None:
         """Deliver worker results only while the Tk window still exists."""
@@ -673,6 +771,11 @@ class DesktopApp:
     def _show_result(self, result: object, provider: str, request_id: int) -> None:
         if not request_is_current(request_id, self.active_request_id, self.closed):
             return
+        warning_kinds = {warning.kind for warning in result.audit.fact_preservation_warnings}
+        # Ollama can stop between the short readiness GET and the actual model
+        # request. Do not advertise a thorough mode that just proved unavailable.
+        if "provider_unavailable" in warning_kinds:
+            self._set_mistral_availability(False)
         self.busy = False
         self.processing_active = False
         self.progress.stop()
@@ -680,6 +783,7 @@ class DesktopApp:
         self.input_text.configure(state="normal")
         self.mode_box.configure(state="readonly")
         self.protected_terms_button.configure(state="normal")
+        self._refresh_mistral_controls()
         rewritten = result.rewritten_text
         source = self.input_text.get("1.0", "end-1c")
         changed = rewritten != source
@@ -701,13 +805,12 @@ class DesktopApp:
         )
         self.discard_edit_button.configure(state="disabled")
         self.copy_button.focus_set()
-        warning_kinds = {warning.kind for warning in result.audit.fact_preservation_warnings}
         if "model_input_too_long" in warning_kinds:
             message = "Text war für Mistral zu lang; vollständig lokal schnell bearbeitet."
         elif "provider_timeout" in warning_kinds:
             message = "Mistral hat die Zeitgrenze erreicht; sichere lokale Fassung angezeigt."
         elif "provider_unavailable" in warning_kinds:
-            message = "Mistral war nicht rechtzeitig verfügbar; sicher bereinigtes Ergebnis angezeigt."
+            message = "Mistral war nicht verfügbar; sichere lokale Grundbereinigung angezeigt."
         elif "user_selected_safe_fallback" in warning_kinds:
             message = "Sichere lokale Fassung gewählt – bereit zum Kopieren."
         elif "rewrite_rejected" in warning_kinds:
@@ -824,6 +927,7 @@ class DesktopApp:
         self.input_text.configure(state="normal")
         self.mode_box.configure(state="readonly")
         self.protected_terms_button.configure(state="normal")
+        self._refresh_mistral_controls()
         source = self.input_text.get("1.0", "end-1c")
         previous = self.output_text.get("1.0", "end-1c")
         previous_available = result_is_current(source, self.processed_source, previous, False)

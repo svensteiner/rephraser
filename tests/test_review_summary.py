@@ -50,7 +50,7 @@ def test_review_summary_explains_automatic_rejection_as_safe_fallback() -> None:
 
     assert summary.level == "protected"
     assert "automatisch verworfen" in summary.title
-    assert "sichere Ersatzfassung" in summary.message
+    assert "sichere lokale Grundbereinigung" in summary.message
     assert any("Zeitgrenze" in notice for notice in summary.notices)
     assert any("inhaltlich veränderte Fassung" in notice for notice in summary.notices)
 

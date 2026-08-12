@@ -11,6 +11,7 @@ from app.desktop import (
     RELEASE_PAGE_URL,
     result_is_current,
     run_self_test,
+    system_status_text,
 )
 
 
@@ -21,7 +22,7 @@ def test_keyboard_shortcuts_cover_complete_mouse_free_workflow() -> None:
         "Strg+Umschalt+V": "Zwischenablage einfügen",
         "Strg+Enter": "Text verbessern",
         "Strg+E": "Ergebnis bearbeiten / prüfen",
-        "Escape": "Manuelle Änderungen verwerfen",
+        "Escape": "Sichere Fassung / manuelle Änderungen verwerfen",
         "Strg+Umschalt+C": "Ergebnis kopieren",
     }
 
@@ -94,7 +95,7 @@ def test_late_worker_results_are_rejected_after_fallback_or_close() -> None:
     assert request_is_current(4, 4, closed=True) is False
 
 
-def test_safe_result_action_invalidates_slow_model_and_starts_fast_editor(monkeypatch) -> None:
+def test_safe_result_action_invalidates_slow_model_and_starts_rules_cleanup(monkeypatch) -> None:
     from app.desktop import DesktopApp
 
     configured: list[dict[str, object]] = []
@@ -120,6 +121,7 @@ def test_safe_result_action_invalidates_slow_model_and_starts_fast_editor(monkey
     app.processing_active = True
     app.active_request_id = 7
     app.mistral_ready = True
+    app.model_request_inflight_id = 7
     app.input_text = Input()
     app.run_button = Widget()
     app.result_status = Widget()
@@ -133,13 +135,300 @@ def test_safe_result_action_invalidates_slow_model_and_starts_fast_editor(monkey
     assert app.processing_active is False
     assert started_with == [(
         "Ein unveränderter Text.",
-        "fast-editor",
-        "medium",
+        "rules",
+        "light",
         8,
         (),
         "user_selected_safe_fallback",
     )]
     assert any(item.get("text") == "Sichere lokale Fassung wird sofort erstellt …" for item in configured)
+
+
+def test_thorough_mode_preflight_immediately_uses_rules_when_mistral_stopped(monkeypatch) -> None:
+    from app.desktop import DesktopApp
+
+    started_with: list[tuple[object, ...]] = []
+
+    class Widget:
+        def __init__(self):
+            self.values: dict[str, object] = {}
+
+        def configure(self, **values):
+            self.values.update(values)
+
+        def focus_set(self):
+            self.values["focused"] = True
+
+    class Input(Widget):
+        def get(self, start, end):
+            return "Ein klarer Text."
+
+    class Mode:
+        def __init__(self, value):
+            self.value = value
+
+        def get(self):
+            return self.value
+
+        def set(self, value):
+            self.value = value
+
+    class Progress:
+        def start(self, interval):
+            return None
+
+    class Root:
+        def update_idletasks(self):
+            return None
+
+    class ImmediateThread:
+        def __init__(self, *, target, args, **kwargs):
+            started_with.append(args)
+
+        def start(self):
+            return None
+
+    app = DesktopApp.__new__(DesktopApp)
+    app.busy = False
+    app.processing_active = False
+    app.active_request_id = 0
+    app.model_request_inflight_id = None
+    app.mistral_ready = True
+    app.manual_result_verified = True
+    app.protected_terms = ()
+    app.mode = Mode(MODE_STRONG)
+    app.input_text = Input()
+    app.mode_box = Widget()
+    app.run_button = Widget()
+    app.copy_button = Widget()
+    app.protected_terms_button = Widget()
+    app.result_status = Widget()
+    app.system_status = Widget()
+    app.progress = Progress()
+    app.root = Root()
+    app.tk = type("Tk", (), {"TclError": RuntimeError})
+    monkeypatch.setattr("app.desktop.preflight_local_mistral", lambda: False)
+    monkeypatch.setattr("app.desktop.threading.Thread", ImmediateThread)
+
+    app.start_processing()
+
+    assert started_with == [("Ein klarer Text.", "rules", "light", 1, (), "provider_unavailable")]
+    assert app.mistral_ready is False
+    assert app.mode.get() == MODE_AUTOMATIC
+    assert app.mode_box.values["values"] == available_modes(False)
+    assert "derzeit nicht erreichbar" in app.result_status.values["text"]
+    assert "optional" in app.system_status.values["text"]
+
+
+def test_thorough_mode_preflight_keeps_model_path_when_local_model_is_ready(monkeypatch) -> None:
+    from app.desktop import DesktopApp
+
+    started_with: list[tuple[object, ...]] = []
+
+    class Widget:
+        def __init__(self):
+            self.values: dict[str, object] = {}
+
+        def configure(self, **values):
+            self.values.update(values)
+
+        def focus_set(self):
+            self.values["focused"] = True
+
+    class Input(Widget):
+        def get(self, start, end):
+            return "Ein klarer Text."
+
+    class Mode:
+        def get(self):
+            return MODE_STRONG
+
+        def set(self, value):
+            raise AssertionError(f"unexpected mode change: {value}")
+
+    class Progress:
+        def start(self, interval):
+            return None
+
+    class Root:
+        def update_idletasks(self):
+            return None
+
+    class ImmediateThread:
+        def __init__(self, *, target, args, **kwargs):
+            started_with.append(args)
+
+        def start(self):
+            return None
+
+    app = DesktopApp.__new__(DesktopApp)
+    app.busy = False
+    app.processing_active = False
+    app.active_request_id = 0
+    app.model_request_inflight_id = None
+    app.mistral_ready = True
+    app.manual_result_verified = True
+    app.protected_terms = ()
+    app.mode = Mode()
+    app.input_text = Input()
+    app.mode_box = Widget()
+    app.run_button = Widget()
+    app.copy_button = Widget()
+    app.protected_terms_button = Widget()
+    app.result_status = Widget()
+    app.progress = Progress()
+    app.root = Root()
+    app.tk = type("Tk", (), {"TclError": RuntimeError})
+    app._update_elapsed_time = lambda: None
+    monkeypatch.setattr("app.desktop.preflight_local_mistral", lambda: True)
+    monkeypatch.setattr("app.desktop.threading.Thread", ImmediateThread)
+
+    app.start_processing()
+
+    assert started_with == [("Ein klarer Text.", "rules+mistral-local", "substantial", 1, (), None)]
+    assert app.model_request_inflight_id == 1
+    assert app.run_button.values["text"] == "Sichere Fassung jetzt"
+    assert app.run_button.values["focused"] is True
+
+
+def test_thorough_mode_stays_hidden_until_abandoned_model_worker_finishes() -> None:
+    from app.desktop import DesktopApp
+
+    class Widget:
+        def __init__(self):
+            self.values: dict[str, object] = {}
+
+        def configure(self, **values):
+            self.values.update(values)
+
+    class Input:
+        def get(self, start, end):
+            return "Ein klarer Text."
+
+    class Mode:
+        def __init__(self):
+            self.value = MODE_AUTOMATIC
+
+        def get(self):
+            return self.value
+
+        def set(self, value):
+            self.value = value
+
+    app = DesktopApp.__new__(DesktopApp)
+    app.mistral_ready = True
+    app.model_request_inflight_id = 4
+    app.input_text = Input()
+    app.mode = Mode()
+    app.mode_box = Widget()
+    app.system_status = Widget()
+
+    app._refresh_mistral_controls()
+    assert app.mode_box.values["values"] == available_modes(False)
+    app._model_request_finished(4)
+    assert app.model_request_inflight_id is None
+    assert app.mode_box.values["values"] == available_modes(True)
+    assert "zusätzlich verfügbar" in app.system_status.values["text"]
+
+
+def test_provider_unavailable_result_hides_stale_thorough_mode(monkeypatch) -> None:
+    from app.desktop import DesktopApp
+    from app.models import ValidationWarning
+    from app.pipeline import run_pipeline
+
+    class Widget:
+        def __init__(self):
+            self.values: dict[str, object] = {}
+
+        def configure(self, **values):
+            self.values.update(values)
+
+        def focus_set(self):
+            self.values["focused"] = True
+
+        def pack(self, **values):
+            return None
+
+        def stop(self):
+            return None
+
+    class TextBox(Widget):
+        def __init__(self, text):
+            super().__init__()
+            self.text = text
+
+        def get(self, start, end):
+            return self.text
+
+        def delete(self, start, end):
+            self.text = ""
+
+        def insert(self, start, text):
+            self.text = text
+
+        def edit_modified(self, value):
+            return None
+
+    class Mode:
+        def __init__(self):
+            self.value = MODE_AUTOMATIC
+
+        def get(self):
+            return self.value
+
+        def set(self, value):
+            self.value = value
+
+    result = run_pipeline("Ein klarer Text.")
+    result.audit.fact_preservation_warnings.append(ValidationWarning(
+        kind="provider_unavailable", severity="medium", value="connection_refused", message="unavailable"
+    ))
+    app = DesktopApp.__new__(DesktopApp)
+    app.active_request_id = 3
+    app.closed = False
+    app.mistral_ready = True
+    app.model_request_inflight_id = None
+    app.busy = True
+    app.processing_active = True
+    app.progress = Widget()
+    app.run_button = Widget()
+    app.input_text = TextBox("Ein klarer Text.")
+    app.mode = Mode()
+    app.mode_box = Widget()
+    app.protected_terms_button = Widget()
+    app.system_status = Widget()
+    app.result_line = Widget()
+    app.bottom = Widget()
+    app.output_text = TextBox("")
+    app.result_visible = True
+    app.copy_button = Widget()
+    app.changes_button = Widget()
+    app.edit_result_button = Widget()
+    app.discard_edit_button = Widget()
+    app.result_status = Widget()
+
+    app._show_result(result, "rules", 3)
+
+    assert app.mistral_ready is False
+    assert app.mode_box.values["values"] == available_modes(False)
+    assert "optional" in app.system_status.values["text"]
+    assert "nicht verfügbar" in app.result_status.values["text"]
+
+
+def test_escape_uses_safe_fallback_only_while_model_processing() -> None:
+    from app.desktop import DesktopApp
+
+    called = []
+    app = DesktopApp.__new__(DesktopApp)
+    app.busy = True
+    app.processing_active = True
+    app.output_editing = False
+    app.use_safe_result_now = lambda: called.append("safe")
+    app.discard_manual_edits = lambda: called.append("discard")
+
+    app._handle_escape()
+
+    assert called == ["safe"]
 
 
 def test_ui_watchdog_automatically_uses_safe_result_at_deadline(monkeypatch) -> None:
@@ -191,15 +480,25 @@ def test_timeout_fallback_is_recorded_in_audit() -> None:
     app = DesktopApp.__new__(DesktopApp)
     app._schedule_ui = lambda callback, *args: scheduled.append(args)
 
-    app._worker("Ein klarer Text.", "fast-editor", "medium", 9, (), "provider_timeout")
+    app._worker("Ein klarer Text.", "rules", "light", 9, (), "provider_timeout")
 
     result, provider, request_id = scheduled[0]
-    assert provider == "fast-editor"
+    assert provider == "rules"
     assert request_id == 9
     assert result.audit.requested_provider == "rules+mistral-local"
-    assert result.audit.options["provider"] == "rules+mistral-local"
-    assert result.audit.applied_provider == "fast-editor"
+    assert result.audit.options["provider"] == "rules"
+    assert result.audit.options["rewrite_strength"] == "light"
+    assert result.audit.options["requested_provider"] == "rules+mistral-local"
+    assert result.audit.options["requested_rewrite_strength"] == "substantial"
+    assert result.audit.options["fallback_reason"] == "provider_timeout"
+    assert result.audit.applied_provider == "rules"
     assert any(w.kind == "provider_timeout" for w in result.audit.fact_preservation_warnings)
+
+
+def test_system_status_mentions_only_currently_available_model_actions() -> None:
+    assert "zusätzlich verfügbar" in system_status_text(True)
+    assert "optional" in system_status_text(False)
+    assert "frühere Anfrage" in system_status_text(True, model_request_inflight=True)
 
 
 def test_review_choice_replaces_output_and_keeps_generated_version_recoverable() -> None:

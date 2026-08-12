@@ -1,5 +1,9 @@
 from pathlib import Path
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import json
+import threading
 
+import streamlit as st
 from streamlit.testing.v1 import AppTest
 
 
@@ -73,3 +77,49 @@ def test_manual_result_edit_disables_stale_audit_but_keeps_text_downloads() -> N
     assert any("manuell geändert" in item.value for item in app.info)
     assert len(app.download_button) == 2
     assert all(button.label != "Prüfbericht herunterladen" for button in app.download_button)
+
+
+def test_thorough_streamlit_mode_rechecks_stale_local_model_status_before_text_is_sent(monkeypatch) -> None:
+    state = {"available": True, "calls": 0, "post_called": False}
+
+    class TagsHandler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            assert self.path == "/api/tags"
+            state["calls"] += 1
+            models = [{"name": "mistral:latest"}] if state["available"] else []
+            body = json.dumps({"models": models}).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_POST(self):
+            state["post_called"] = True
+            self.send_error(500)
+
+        def log_message(self, format, *args):
+            return None
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), TagsHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    monkeypatch.setenv("MISTRAL_BASE_URL", f"http://127.0.0.1:{server.server_port}")
+    monkeypatch.setenv("MISTRAL_MODEL", "mistral:latest")
+    st.cache_data.clear()
+    try:
+        app = AppTest.from_file(str(UI), default_timeout=30).run()
+        app.text_area(key="source_text").input("Ein klarer Text.").run()
+        app.radio[0].set_value("Gründlich mit Mistral (bis 45 s)").run()
+        state["available"] = False
+
+        app.button[0].click().run()
+
+        assert app.text_area(key="editable_result").value == "Ein klarer Text."
+        assert state["calls"] >= 2
+        assert state["post_called"] is False
+        assert any("Mistral war nicht verfügbar" in item.value for item in app.caption)
+    finally:
+        server.shutdown()
+        server.server_close()
+        st.cache_data.clear()
