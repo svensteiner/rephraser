@@ -138,6 +138,7 @@ def test_review_choice_replaces_output_and_keeps_generated_version_recoverable()
     app.copy_button = Widget()
     app.changes_button = Widget()
     app.edit_result_button = Widget()
+    app.discard_edit_button = Widget()
     app.result_status = Widget()
     app.generated_result = "Verbesserung"
     app.processed_source = "Original"
@@ -249,7 +250,8 @@ def test_individual_change_selection_is_revalidated_and_applied() -> None:
             return None
 
     class Widget:
-        values = {}
+        def __init__(self):
+            self.values = {}
 
         def configure(self, **values):
             self.values.update(values)
@@ -269,6 +271,7 @@ def test_individual_change_selection_is_revalidated_and_applied() -> None:
     app.output_text = TextBox()
     app.copy_button = Widget()
     app.edit_result_button = Widget()
+    app.discard_edit_button = Widget()
     app.result_status = Widget()
     app.messagebox = object()
     window = Window()
@@ -385,6 +388,7 @@ def test_manual_result_edit_requires_successful_recheck_before_copy() -> None:
     app.copy_button = Widget()
     app.changes_button = Widget()
     app.edit_result_button = Widget()
+    app.discard_edit_button = Widget()
     app.result_status = Widget()
 
     app.toggle_result_editing()
@@ -480,3 +484,60 @@ def test_unverified_manual_result_cannot_be_copied_or_reach_save_dialog() -> Non
     app.save_result()
 
     assert infos and "ungeprüfte" in infos[0][1]
+
+
+def test_discard_manual_edits_restores_exact_last_verified_result() -> None:
+    from app.desktop import DesktopApp
+
+    class TextBox:
+        value = "Beschädigte manuelle Fassung"
+        state = "normal"
+
+        def configure(self, **values):
+            self.state = values.get("state", self.state)
+
+        def delete(self, start, end):
+            self.value = ""
+
+        def insert(self, start, text):
+            self.value = text
+
+        def get(self, start, end):
+            return self.value
+
+        def edit_modified(self, value):
+            return None
+
+    class Source:
+        def get(self, start, end):
+            return "Quelle 12,5 %."
+
+    class Widget:
+        def __init__(self):
+            self.values = {}
+
+        def configure(self, **values):
+            self.values.update(values)
+
+    app = DesktopApp.__new__(DesktopApp)
+    app.output_text = TextBox()
+    app.input_text = Source()
+    app.output_editing = True
+    app.manual_result_verified = False
+    app.verified_result_before_edit = "Geprüfte Fassung 12,5 %."
+    app.generated_result = "Geprüfte Fassung 12,5 %."
+    app.copy_button = Widget()
+    app.changes_button = Widget()
+    app.edit_result_button = Widget()
+    app.discard_edit_button = Widget()
+    app.result_status = Widget()
+
+    app.discard_manual_edits()
+
+    assert app.output_text.value == "Geprüfte Fassung 12,5 %."
+    assert app.output_text.state == "disabled"
+    assert app.output_editing is False
+    assert app.manual_result_verified is True
+    assert app.copy_button.values["state"] == "normal"
+    assert app.discard_edit_button.values["state"] == "disabled"
+    assert "wiederhergestellt" in app.result_status.values["text"]

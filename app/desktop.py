@@ -102,6 +102,7 @@ class DesktopApp:
         self.last_audit: AuditReport | None = None
         self.output_editing = False
         self.manual_result_verified = False
+        self.verified_result_before_edit = ""
         self.busy = False
         self.processing_active = False
         self.processing_started = 0.0
@@ -193,6 +194,14 @@ class DesktopApp:
             state="disabled",
         )
         self.edit_result_button.pack(side="left", padx=(8, 0))
+        self.discard_edit_button = ttk.Button(
+            self.result_line,
+            text="Änderungen verwerfen",
+            command=self.discard_manual_edits,
+            style="Secondary.TButton",
+            state="disabled",
+        )
+        self.discard_edit_button.pack(side="left", padx=(8, 0))
         self.copy_button = ttk.Button(
             self.result_line, text="Ergebnis kopieren", command=self.copy_result,
             style="Secondary.TButton", state="disabled"
@@ -201,6 +210,7 @@ class DesktopApp:
         self.output_text = scrolledtext.ScrolledText(outer, height=10, wrap="word", font=("Segoe UI", 11), undo=True)
         self.output_text.configure(state="disabled")
         self.output_text.bind("<<Modified>>", self._output_changed)
+        self.output_text.bind("<Escape>", lambda _event: self.discard_manual_edits())
         self.result_visible = False
 
         self.bottom = ttk.Frame(outer)
@@ -277,6 +287,7 @@ class DesktopApp:
             self.copy_button.configure(state="disabled")
             self.changes_button.configure(state="disabled")
             self.edit_result_button.configure(state="disabled")
+            self.discard_edit_button.configure(state="disabled")
             self.manual_result_verified = False
             self.result_status.configure(text="Ausgangstext geändert – bitte erneut bearbeiten.")
 
@@ -413,12 +424,14 @@ class DesktopApp:
         self.generated_result = rewritten
         self.last_audit = result.audit
         self.manual_result_verified = True
+        self.verified_result_before_edit = rewritten
         self.copy_button.configure(state="normal")
         self.changes_button.configure(state="normal" if changed else "disabled")
         self.edit_result_button.configure(
             state="normal" if len(rewritten) <= CHANGE_PREVIEW_MAX_CHARACTERS else "disabled",
             text="Ergebnis bearbeiten",
         )
+        self.discard_edit_button.configure(state="disabled")
         self.copy_button.focus_set()
         warning_kinds = {warning.kind for warning in result.audit.fact_preservation_warnings}
         if "model_input_too_long" in warning_kinds:
@@ -481,11 +494,13 @@ class DesktopApp:
             return
         if not self.output_editing:
             current = self.output_text.get("1.0", "end-1c")
+            self.verified_result_before_edit = current
             self._replace_output(current, editable=True)
             self.manual_result_verified = False
             self.copy_button.configure(state="disabled")
             self.changes_button.configure(state="disabled")
             self.edit_result_button.configure(text="Manuelle Fassung prüfen")
+            self.discard_edit_button.configure(state="normal")
             self.result_status.configure(
                 text="Bearbeitungsmodus – Kopieren ist bis zum lokalen Schutzcheck gesperrt."
             )
@@ -507,10 +522,25 @@ class DesktopApp:
         self.copy_button.configure(state="normal")
         self.changes_button.configure(state="normal" if self.generated_result != source else "disabled")
         self.edit_result_button.configure(text="Ergebnis bearbeiten")
+        self.discard_edit_button.configure(state="disabled")
+        self.verified_result_before_edit = candidate
         self.result_status.configure(
             text="Manuelle Fassung geprüft – keine Abweichung bei den überwachten Inhalten gefunden; "
                  "keine Bedeutungs-Garantie."
         )
+
+    def discard_manual_edits(self) -> None:
+        """Restore the exact last verified result without running another transformation."""
+        if not self.output_editing:
+            return
+        self._replace_output(self.verified_result_before_edit)
+        self.manual_result_verified = True
+        self.copy_button.configure(state="normal")
+        source = self.input_text.get("1.0", "end-1c")
+        self.changes_button.configure(state="normal" if self.generated_result != source else "disabled")
+        self.edit_result_button.configure(state="normal", text="Ergebnis bearbeiten")
+        self.discard_edit_button.configure(state="disabled")
+        self.result_status.configure(text="Manuelle Änderungen verworfen – letzte geprüfte Fassung wiederhergestellt.")
 
     def _show_error(self, error: Exception, request_id: int) -> None:
         if not request_is_current(request_id, self.active_request_id, self.closed):
@@ -809,16 +839,20 @@ class DesktopApp:
             return
         self._replace_output(candidate)
         self.manual_result_verified = True
+        self.verified_result_before_edit = candidate
         self.copy_button.configure(state="normal")
         self.edit_result_button.configure(state="normal", text="Ergebnis bearbeiten")
+        self.discard_edit_button.configure(state="disabled")
         self.result_status.configure(text="Geprüfte Einzelauswahl übernommen – bereit zum Kopieren.")
         window.destroy()
 
     def _use_reviewed_text(self, text: str, window: object, *, improved: bool) -> None:
         self._replace_output(text)
         self.manual_result_verified = True
+        self.verified_result_before_edit = text
         self.copy_button.configure(state="normal")
         self.edit_result_button.configure(state="normal", text="Ergebnis bearbeiten")
+        self.discard_edit_button.configure(state="disabled")
         self.changes_button.configure(state="normal" if self.generated_result != self.processed_source else "disabled")
         self.result_status.configure(
             text="Verbesserung ausgewählt – bereit zum Kopieren."
@@ -873,10 +907,12 @@ class DesktopApp:
         self.copy_button.configure(text="Ergebnis kopieren")
         self.changes_button.configure(state="disabled")
         self.edit_result_button.configure(state="disabled", text="Ergebnis bearbeiten")
+        self.discard_edit_button.configure(state="disabled")
         self.processed_source = None
         self.generated_result = ""
         self.last_audit = None
         self.manual_result_verified = False
+        self.verified_result_before_edit = ""
         if self.result_visible:
             self.result_line.pack_forget()
             self.output_text.pack_forget()

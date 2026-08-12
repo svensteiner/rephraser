@@ -25,7 +25,8 @@ Der fertige Text ist standardmäßig gegen versehentliche Eingaben geschützt. �
 **Ergebnis bearbeiten** lässt er sich bewusst ändern. Kopieren und Speichern bleiben
 dann gesperrt, bis **Manuelle Fassung prüfen** keine Abweichung bei den überwachten
 Inhalten findet. Die App bezeichnet diesen Schutzcheck ausdrücklich nicht als
-Bedeutungs-Garantie.
+Bedeutungs-Garantie. **Änderungen verwerfen** oder die Escape-Taste stellt jederzeit
+exakt die letzte geprüfte Fassung wieder her.
 Eine verständliche Inhaltsprüfung nennt den tatsächlich geprüften Umfang und zeigt klar,
 ob keine überwachte Abweichung gefunden, eine unsichere Fassung automatisch verworfen
 oder eine Stelle manuell zu kontrollieren ist. Sie weist ausdrücklich darauf hin, dass
