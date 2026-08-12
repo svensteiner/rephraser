@@ -7,14 +7,31 @@ from .inspection import split_sentences
 from .models import DiffReport
 
 
+def _stable_diff(old_items: list[str], new_items: list[str]) -> list[str]:
+    """Return an ndiff-like representation without Differ's recursive fancy matching."""
+    lines: list[str] = []
+    matcher = difflib.SequenceMatcher(None, old_items, new_items, autojunk=False)
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal":
+            lines.extend(f"  {item}" for item in old_items[i1:i2])
+        elif tag == "delete":
+            lines.extend(f"- {item}" for item in old_items[i1:i2])
+        elif tag == "insert":
+            lines.extend(f"+ {item}" for item in new_items[j1:j2])
+        else:
+            lines.extend(f"- {item}" for item in old_items[i1:i2])
+            lines.extend(f"+ {item}" for item in new_items[j1:j2])
+    return lines
+
+
 def create_diff(original: str, rewritten: str) -> DiffReport:
     old_words, new_words = re.findall(r"\S+\s*", original), re.findall(r"\S+\s*", rewritten)
     old_tokens = [token.casefold() for token in re.findall(r"\b\w+\b", original)]
     new_tokens = [token.casefold() for token in re.findall(r"\b\w+\b", rewritten)]
     lexical_similarity = difflib.SequenceMatcher(None, old_tokens, new_tokens).ratio()
     old_sentences, new_sentences = split_sentences(original), split_sentences(rewritten)
-    word_diff = list(difflib.ndiff(old_words, new_words))
-    sentence_diff = list(difflib.ndiff(old_sentences, new_sentences))
+    word_diff = _stable_diff(old_words, new_words)
+    sentence_diff = _stable_diff(old_sentences, new_sentences)
     matcher = difflib.SequenceMatcher(None, old_sentences, new_sentences)
     added, removed, rewritten_items = [], [], []
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
