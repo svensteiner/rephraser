@@ -10,7 +10,9 @@ permissions:
 jobs:
   pytest:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
+      fail-fast: false
       matrix:
         python-version: ["3.12", "3.13"]
     steps:
@@ -21,3 +23,5 @@ jobs:
           cache: pip
       - run: python -m pip install -e ".[dev,ui]"
       - run: python -m pytest -q
+      - name: Run DE/EN editorial quality gate
+        run: python -m app.evaluation

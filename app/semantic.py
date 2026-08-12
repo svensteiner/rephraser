@@ -19,7 +19,8 @@ NON_NAME_STARTERS = {
     "am", "an", "auf", "aus", "bei", "das", "dem", "den", "der", "des", "die", "ein", "eine",
     "für", "im", "in", "mit", "ohne", "seit", "über", "um", "vom", "von", "vor", "wir", "zum", "zur",
     "a", "an", "at", "could", "dear", "for", "from", "hello", "hi", "in", "on", "please", "regarding",
-    "thank", "that", "the", "these", "this", "those", "to", "we", "with", "without", "would", "you",
+    "daher", "derzeit", "weil", "thank", "that", "the", "these", "this", "those", "to", "we",
+    "with", "without", "would", "you", "because", "currently",
 }
 
 

@@ -58,6 +58,23 @@ This application optimizes editorial quality—not detector scores. It does not 
 an “AI probability,” claim that text is undetectable, or attempt to defeat AI provenance
 or statistical watermarking systems.
 
+## DE/EN quality regression gate
+
+Realistic German and English business-text cases are versioned in
+`app/evaluation_cases.json`. They cover the paste-from-Claude email workflow,
+conciseness edits, negative controls, protected quotations, Markdown, URLs, numbers,
+dates, negation, uncertainty, Unicode cleanup, and emoji. Every case fixes the expected
+output, protected values, warning state, and applied local provider. Run the same gate
+used by GitHub Actions with:
+
+```powershell
+python -m app.evaluation
+```
+
+The command exits non-zero and reports the exact mismatch if a future change alters a
+golden output, loses protected content, introduces a semantic warning, or silently falls
+back to another provider.
+
 ## Privacy and provider model
 
 The default `fast-editor` stage is deterministic, offline, and immediate. It applies a

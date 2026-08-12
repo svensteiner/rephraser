@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 
 from .models import SemanticConstraints, ValidationWarning
 from .semantic import DATE, NUMBER, URL, extract_semantics
@@ -26,6 +27,14 @@ ASSOCIATION_STOPWORDS = {
     "for", "from", "hat", "haben", "ist", "mit", "the", "this", "to", "von", "war", "was",
     "were", "will", "wird", "with", "zum", "zur",
 }
+
+
+def _cleanup_artifact_equivalent(text: str) -> str:
+    """Mirror only meaning-neutral Unicode cleanup for semantic comparison."""
+    cleaned = unicodedata.normalize("NFC", text).replace("\r\n", "\n").replace("\r", "\n")
+    if cleaned.startswith("\ufeff"):
+        cleaned = cleaned[1:]
+    return cleaned.replace("\u200b", "").replace("\u00ad", "").replace("\u00a0", " ").replace("\u202f", " ")
 
 
 def _markdown_signature(text: str) -> dict[str, list[str] | int]:
@@ -116,6 +125,7 @@ def validate_preservation(original: str, rewritten: str, constraints: SemanticCo
                 warnings.append(ValidationWarning(kind="altered_citation_format", severity="high",
                     value=citation, message="Citation or URL embedding changed in the rewrite."))
     new_semantics = extract_semantics(rewritten)
+    artifact_equivalent_original = _cleanup_artifact_equivalent(original)
     for kind, values, originals in (
         ("number", new_semantics.numbers if preserve_numbers else [], constraints.numbers),
         ("date", new_semantics.dates if preserve_numbers else [], constraints.dates),
@@ -124,7 +134,7 @@ def validate_preservation(original: str, rewritten: str, constraints: SemanticCo
         ("quotation", new_semantics.quotations if preserve_quotations else [], constraints.quotations),
     ):
         for value in values:
-            if value not in originals:
+            if value not in originals and value not in artifact_equivalent_original:
                 warnings.append(ValidationWarning(kind=f"new_{kind}", severity="high", value=value,
                     message=f"Rewrite introduces a {kind} not found in the original."))
     original_terms = set(re.findall(r"\b[\wÄÖÜäöüß-]{5,}\b", original.casefold()))

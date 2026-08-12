@@ -19,6 +19,7 @@ PROTECTED_PROSE = re.compile(
 
 REPLACEMENTS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\bWe would like to better understand\b"), "We would appreciate clarification on"),
+    (re.compile(r"\bwe would like to better understand\b"), "we would appreciate clarification on"),
     (re.compile(r"\bYou mentioned that\b"), "You noted that"),
     (re.compile(r"\bCould you please clarify:\s*(?=\n|$)"), "Could you please clarify the following:"),
     (re.compile(r"\bIn order to\b"), "To"),

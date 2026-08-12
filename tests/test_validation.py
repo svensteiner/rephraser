@@ -14,6 +14,13 @@ def test_detects_new_numeric_claim() -> None:
     assert any(w.kind == "new_number" for w in warnings)
 
 
+def test_meaning_neutral_invisible_cleanup_does_not_invent_a_new_name() -> None:
+    original = "A\u200bB und Soft\u00adhyphen"
+    rewritten = "AB und Softhyphen"
+    warnings = validate_preservation(original, rewritten, extract_semantics(original))
+    assert not any(w.kind == "new_proper_name" for w in warnings)
+
+
 def test_detects_added_claim_and_changed_url_embedding() -> None:
     original = "Die Marge betrug 12,5 %. Quelle: https://example.org/report."
     rewritten = ("Die Marge betrug 12,5 %. Quelle: <https://example.org/report>. "

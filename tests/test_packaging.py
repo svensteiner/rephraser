@@ -32,3 +32,13 @@ def test_release_workflow_packages_entire_folder_and_manifest() -> None:
     assert "Copy-Item dist\\TextVerbessern\\* portable -Recurse -Force" in workflow
     assert "release-manifest.json" in workflow
     assert "Get-FileHash -Algorithm SHA256" in workflow
+
+
+def test_ci_runs_quality_gate_for_every_supported_python_version() -> None:
+    workflow = (ROOT / ".github" / "workflows" / "tests.yml").read_text(encoding="utf-8")
+    pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    assert 'python-version: ["3.12", "3.13"]' in workflow
+    assert "fail-fast: false" in workflow
+    assert "timeout-minutes: 15" in workflow
+    assert "python -m app.evaluation" in workflow
+    assert 'app = ["evaluation_cases.json"]' in pyproject

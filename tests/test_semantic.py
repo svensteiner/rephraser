@@ -43,6 +43,14 @@ def test_names_are_conservative_and_do_not_cross_lines() -> None:
     assert all("\n" not in name for name in result.names)
 
 
+def test_editorial_sentence_starters_are_not_misclassified_as_names() -> None:
+    result = extract_semantics(
+        "Weil Beleg 17 fehlt, bleibt die Prüfung offen. Because Evidence 4 is missing, review continues."
+    )
+    assert "Weil Beleg" not in result.names
+    assert "Because Evidence" not in result.names
+
+
 def test_all_non_uncertain_claims_are_retained() -> None:
     text = " ".join(f"Claim {index} is confirmed." for index in range(1, 13))
     result = extract_semantics(text)

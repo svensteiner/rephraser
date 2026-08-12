@@ -17,6 +17,15 @@ def test_business_email_is_improved_instantly_without_changing_entities() -> Non
     assert result.audit.fact_preservation_warnings == []
 
 
+def test_lowercase_phrase_inside_real_business_sentence_is_improved() -> None:
+    text = "Regarding the accounts, we would like to better understand their legal ownership."
+    result = run_pipeline(text, TransformOptions(provider="fast-editor"))
+    assert result.rewritten_text == (
+        "Regarding the accounts, we would appreciate clarification on their legal ownership."
+    )
+    assert result.audit.fact_preservation_warnings == []
+
+
 def test_fast_editor_preserves_quotes_inline_code_and_fenced_code() -> None:
     text = (
         'She said "We would like to better understand this." `In order to`\n'

@@ -1,0 +1,145 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "id": "en-audit-clarification-email",
+      "language": "en",
+      "category": "business-email",
+      "provider": "fast-editor",
+      "input": "Hi Twisha,\n\nThank you for the clarification and the mapping file.\n\nRegarding the UniCredit BulBank accounts, we would like to better understand the legal and economic ownership of these accounts.\n\nYou mentioned that Austria is the account holder, while the funds originate from DAI Global Belgium and all related transactions and expenses are recorded in the Belgian books.\n\nCould you please clarify:\n- Which legal entity is the contractual account holder vis-à-vis UniCredit BulBank?\n- Which entity has legal ownership of the funds held in these accounts?\n- Who is considered the beneficial/economic owner of the funds?",
+      "expected_output": "Hi Twisha,\n\nThank you for the clarification and the mapping file.\n\nRegarding the UniCredit BulBank accounts, we would appreciate clarification on the legal and economic ownership of these accounts.\n\nYou noted that Austria is the account holder, while the funds originate from DAI Global Belgium and all related transactions and expenses are recorded in the Belgian books.\n\nCould you please clarify the following:\n- Which legal entity is the contractual account holder vis-à-vis UniCredit BulBank?\n- Which entity has legal ownership of the funds held in these accounts?\n- Who is considered the beneficial/economic owner of the funds?",
+      "must_preserve": ["Twisha", "UniCredit BulBank", "Austria", "DAI Global Belgium", "beneficial/economic owner"],
+      "expected_warning_kinds": []
+    },
+    {
+      "id": "en-concise-business-prose",
+      "language": "en",
+      "category": "conciseness",
+      "provider": "fast-editor",
+      "input": "In order to complete the review, we need the ledger. Due to the fact that the file is incomplete, we cannot conclude. At this point in time, the balance remains open.",
+      "expected_output": "To complete the review, we need the ledger. Because the file is incomplete, we cannot conclude. Currently, the balance remains open.",
+      "must_preserve": ["ledger", "cannot conclude", "balance remains open"],
+      "expected_warning_kinds": []
+    },
+    {
+      "id": "en-protected-quotes-and-code",
+      "language": "en",
+      "category": "protected-structure",
+      "provider": "fast-editor",
+      "input": "She wrote \"We would like to better understand the balance.\"\n\n`In order to` is part of the documented command.\n\nWe would like to better understand the variance.",
+      "expected_output": "She wrote \"We would like to better understand the balance.\"\n\n`In order to` is part of the documented command.\n\nWe would appreciate clarification on the variance.",
+      "must_preserve": ["\"We would like to better understand the balance.\"", "`In order to`"],
+      "expected_warning_kinds": []
+    },
+    {
+      "id": "en-negation-and-uncertainty-noop",
+      "language": "en",
+      "category": "semantic-noop",
+      "provider": "fast-editor",
+      "input": "Revenue might increase, but operating profit will not exceed EUR 5.0 million in 2026.",
+      "expected_output": "Revenue might increase, but operating profit will not exceed EUR 5.0 million in 2026.",
+      "must_preserve": ["might", "not", "EUR 5.0 million", "2026"],
+      "expected_warning_kinds": []
+    },
+    {
+      "id": "de-business-conciseness",
+      "language": "de",
+      "category": "conciseness",
+      "provider": "fast-editor",
+      "input": "Wir möchten gerne die Kontenabstimmung abschließen. Zum jetzigen Zeitpunkt fehlt uns noch der Saldennachweis. Es ist wichtig zu beachten, dass die Frist am 3. März 2026 endet.",
+      "expected_output": "Wir möchten die Kontenabstimmung abschließen. Derzeit fehlt uns noch der Saldennachweis. Zu beachten ist, dass die Frist am 3. März 2026 endet.",
+      "must_preserve": ["Kontenabstimmung", "Saldennachweis", "3. März 2026"],
+      "expected_warning_kinds": []
+    },
+    {
+      "id": "de-causal-conciseness",
+      "language": "de",
+      "category": "conciseness",
+      "provider": "fast-editor",
+      "input": "Aufgrund der Tatsache, dass Beleg 17 fehlt, bleibt die Prüfung offen. Der Betrag von EUR 1.234,56 wurde nicht bestätigt.",
+      "expected_output": "Weil Beleg 17 fehlt, bleibt die Prüfung offen. Der Betrag von EUR 1.234,56 wurde nicht bestätigt.",
+      "must_preserve": ["Beleg 17", "EUR 1.234,56", "nicht bestätigt"],
+      "expected_warning_kinds": []
+    },
+    {
+      "id": "de-quotation-noop",
+      "language": "de",
+      "category": "semantic-noop",
+      "provider": "fast-editor",
+      "input": "Anna Müller erklärte: „Wir möchten gerne den Betrag von 12,5 % bestätigen.“ Quelle: https://example.org/audit.",
+      "expected_output": "Anna Müller erklärte: „Wir möchten gerne den Betrag von 12,5 % bestätigen.“ Quelle: https://example.org/audit.",
+      "must_preserve": ["Anna Müller", "„Wir möchten gerne den Betrag von 12,5 % bestätigen.“", "https://example.org/audit"],
+      "expected_warning_kinds": []
+    },
+    {
+      "id": "markdown-hard-break-and-fence",
+      "language": "de",
+      "category": "markdown",
+      "provider": "fast-editor",
+      "input": "# Bericht\n\nZeile mit Umbruch.  \nNächste Zeile.\n\n```text\nWir möchten gerne exakt bleiben.\n\n\nCode-Abstand\n```\n",
+      "expected_output": "# Bericht\n\nZeile mit Umbruch.  \nNächste Zeile.\n\n```text\nWir möchten gerne exakt bleiben.\n\n\nCode-Abstand\n```\n",
+      "must_preserve": ["Zeile mit Umbruch.  \nNächste Zeile.", "Wir möchten gerne exakt bleiben.\n\n\nCode-Abstand"],
+      "expected_warning_kinds": []
+    },
+    {
+      "id": "emoji-zwj-noop",
+      "language": "de",
+      "category": "unicode",
+      "provider": "fast-editor",
+      "input": "Das Team 👩‍💻 prüft den Beleg; der Status bleibt ✅.",
+      "expected_output": "Das Team 👩‍💻 prüft den Beleg; der Status bleibt ✅.",
+      "must_preserve": ["👩‍💻", "✅"],
+      "expected_warning_kinds": []
+    },
+    {
+      "id": "unknown-format-control-retained",
+      "language": "de",
+      "category": "unicode",
+      "provider": "rules",
+      "input": "A⁠B",
+      "expected_output": "A⁠B",
+      "must_preserve": ["⁠"],
+      "expected_warning_kinds": []
+    },
+    {
+      "id": "copy-paste-artifacts-cleaned",
+      "language": "de",
+      "category": "unicode-cleanup",
+      "provider": "rules",
+      "input": "﻿Grüße aus Wien – A​B und Soft­hyphen.",
+      "expected_output": "Grüße aus Wien – AB und Softhyphen.",
+      "must_preserve": ["Grüße", "Wien", "–"],
+      "expected_warning_kinds": []
+    },
+    {
+      "id": "line-endings-normalized",
+      "language": "de",
+      "category": "unicode-cleanup",
+      "provider": "rules",
+      "input": "Erste Zeile.\r\n\r\nZweite Zeile.\r\n",
+      "expected_output": "Erste Zeile.\n\nZweite Zeile.\n",
+      "must_preserve": ["Erste Zeile.", "Zweite Zeile."],
+      "expected_warning_kinds": []
+    },
+    {
+      "id": "concise-human-text-noop",
+      "language": "de",
+      "category": "negative-control",
+      "provider": "fast-editor",
+      "input": "Bitte senden Sie uns den unterzeichneten Vertrag bis Freitag.",
+      "expected_output": "Bitte senden Sie uns den unterzeichneten Vertrag bis Freitag.",
+      "must_preserve": ["unterzeichneten Vertrag", "Freitag"],
+      "expected_warning_kinds": []
+    },
+    {
+      "id": "citation-query-and-fragment-noop",
+      "language": "en",
+      "category": "citation",
+      "provider": "fast-editor",
+      "input": "See https://example.org/report?q=12.5%25#note for the source.",
+      "expected_output": "See https://example.org/report?q=12.5%25#note for the source.",
+      "must_preserve": ["https://example.org/report?q=12.5%25#note"],
+      "expected_warning_kinds": []
+    }
+  ]
+}
