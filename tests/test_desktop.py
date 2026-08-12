@@ -100,3 +100,89 @@ def test_safe_result_action_invalidates_slow_model_and_starts_fast_editor(monkey
     assert app.processing_active is False
     assert started_with == [("Ein unveränderter Text.", "fast-editor", "medium", 8)]
     assert any(item.get("text") == "Sichere lokale Fassung wird sofort erstellt …" for item in configured)
+
+
+def test_review_choice_replaces_output_and_keeps_generated_version_recoverable() -> None:
+    from app.desktop import DesktopApp
+
+    class TextBox:
+        value = "Verbesserung"
+
+        def delete(self, start, end):
+            self.value = ""
+
+        def insert(self, start, text):
+            self.value = text
+
+    class Widget:
+        def __init__(self):
+            self.values = {}
+
+        def configure(self, **values):
+            self.values.update(values)
+
+    class Window:
+        destroyed = False
+
+        def destroy(self):
+            self.destroyed = True
+
+    app = DesktopApp.__new__(DesktopApp)
+    app.output_text = TextBox()
+    app.copy_button = Widget()
+    app.changes_button = Widget()
+    app.result_status = Widget()
+    app.generated_result = "Verbesserung"
+    app.processed_source = "Original"
+    window = Window()
+
+    app._use_reviewed_text("Original", window, improved=False)
+
+    assert app.output_text.value == "Original"
+    assert app.generated_result == "Verbesserung"
+    assert app.copy_button.values["state"] == "normal"
+    assert app.changes_button.values["state"] == "normal"
+    assert app.result_status.values["text"] == "Original ausgewählt – bereit zum Kopieren."
+    assert window.destroyed is True
+
+
+def test_worker_results_are_queued_without_calling_tk_from_background_thread() -> None:
+    import queue
+    from app.desktop import DesktopApp
+
+    class Root:
+        def after(self, *args):
+            raise AssertionError("background worker must not call Tk")
+
+    app = DesktopApp.__new__(DesktopApp)
+    app.closed = False
+    app.root = Root()
+    app.ui_events = queue.Queue()
+    callback = object()
+
+    app._schedule_ui(callback, "result", 4)
+
+    assert app.ui_events.get_nowait() == (callback, ("result", 4))
+
+
+def test_ui_queue_is_drained_on_main_thread() -> None:
+    import queue
+    from app.desktop import DesktopApp
+
+    scheduled = []
+    received = []
+
+    class Root:
+        def after(self, delay, callback):
+            scheduled.append((delay, callback))
+
+    app = DesktopApp.__new__(DesktopApp)
+    app.closed = False
+    app.root = Root()
+    app.ui_events = queue.Queue()
+    app.ui_events.put((lambda *args: received.append(args), ("fertig", 9)))
+
+    app._drain_ui_events()
+
+    assert received == [("fertig", 9)]
+    assert scheduled[0][0] == 50

@@ -14,7 +14,11 @@ Für den direkten Kopierablauf gibt es in der Windows-App die Schaltfläche
 **Aus Zwischenablage einfügen**. Die App zeigt nur Funktionen an, die auf dem jeweiligen
 PC wirklich verfügbar sind. **Schnell verbessern** arbeitet regelbasiert, vollständig
 lokal und typischerweise in deutlich unter einer Sekunde. Wirkungslose Optionen werden
-nicht angeboten.
+nicht angeboten. Nach der Bearbeitung öffnet **Änderungen ansehen** eine optionale
+Gegenüberstellung: Rot markiert die frühere, Grün die neue Formulierung. Dort kann mit
+einem Klick das Original oder die Verbesserung als kopierbare Fassung ausgewählt werden.
+Während einer gründlichen Mistral-Bearbeitung liefert **Sichere Fassung jetzt** ohne
+weiteres Warten die lokale Schnellbearbeitung.
 
 Die Browser-Oberfläche zeigt nach der Bearbeitung **Original und Ergebnis nebeneinander**.
 Unter **Bearbeitung anpassen** lassen sich Sprache sowie der exakte Schutz von Zahlen

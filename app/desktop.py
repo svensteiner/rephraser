@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import queue
 import sys
 import threading
 import time
 
+from app.change_preview import build_change_preview
 from app.local_runtime import LOCAL_MODEL_MAX_CHARACTERS, local_mistral_ready, local_model_eligible
 from app.diagnostics import write_diagnostic_event
 from app.models import TransformOptions
@@ -20,6 +22,7 @@ MODE_AUTOMATIC = "Schnell verbessern (empfohlen)"
 MODE_SAFE = "Nur Format bereinigen"
 MODE_STRONG = "Gründlich mit Mistral (bis 45 s)"
 MAX_CHARACTERS = 2_000_000
+CHANGE_PREVIEW_MAX_CHARACTERS = 200_000
 
 
 def processing_settings(mode: str, mistral_ready: bool) -> tuple[str, str]:
@@ -79,6 +82,8 @@ class DesktopApp:
         from tkinter import filedialog, messagebox, scrolledtext, ttk
 
         self.tk = tk
+        self.ttk = ttk
+        self.scrolledtext = scrolledtext
         self.filedialog = filedialog
         self.messagebox = messagebox
         self.root = tk.Tk()
@@ -88,12 +93,15 @@ class DesktopApp:
         self.root.configure(background="#f4f7f5")
         self.mistral_ready = local_mistral_ready()
         self.processed_source: str | None = None
+        self.generated_result = ""
         self.busy = False
         self.processing_active = False
         self.processing_started = 0.0
         self.active_request_id = 0
         self.closed = False
+        self.ui_events: queue.Queue[tuple[object, tuple[object, ...]]] = queue.Queue()
         self.root.protocol("WM_DELETE_WINDOW", self._close)
+        self.root.after(50, self._drain_ui_events)
 
         style = ttk.Style(self.root)
         style.theme_use("vista" if "vista" in style.theme_names() else style.theme_use())
@@ -161,6 +169,14 @@ class DesktopApp:
 
         self.result_line = ttk.Frame(outer)
         ttk.Label(self.result_line, text="Fertiger Text", font=("Segoe UI", 11, "bold")).pack(side="left")
+        self.changes_button = ttk.Button(
+            self.result_line,
+            text="Änderungen ansehen",
+            command=self.open_change_preview,
+            style="Secondary.TButton",
+            state="disabled",
+        )
+        self.changes_button.pack(side="left", padx=(12, 0))
         self.copy_button = ttk.Button(
             self.result_line, text="Ergebnis kopieren", command=self.copy_result,
             style="Secondary.TButton", state="disabled"
@@ -234,6 +250,7 @@ class DesktopApp:
                 )
         if self.processed_source is not None and source != self.processed_source:
             self.copy_button.configure(state="disabled")
+            self.changes_button.configure(state="disabled")
             self.result_status.configure(text="Ausgangstext geändert – bitte erneut bearbeiten.")
 
     def open_file(self) -> None:
@@ -333,10 +350,19 @@ class DesktopApp:
         """Deliver worker results only while the Tk window still exists."""
         if self.closed:
             return
-        try:
-            self.root.after(0, callback, *args)
-        except self.tk.TclError:
+        self.ui_events.put((callback, args))
+
+    def _drain_ui_events(self) -> None:
+        """Run queued worker completions exclusively on Tk's main thread."""
+        if self.closed:
             return
+        while True:
+            try:
+                callback, args = self.ui_events.get_nowait()
+            except queue.Empty:
+                break
+            callback(*args)  # type: ignore[operator]
+        self.root.after(50, self._drain_ui_events)
 
     def _show_result(self, result: object, provider: str, request_id: int) -> None:
         if not request_is_current(request_id, self.active_request_id, self.closed):
@@ -357,7 +383,9 @@ class DesktopApp:
         self.output_text.delete("1.0", "end")
         self.output_text.insert("1.0", rewritten)
         self.processed_source = source
+        self.generated_result = rewritten
         self.copy_button.configure(state="normal")
+        self.changes_button.configure(state="normal" if changed else "disabled")
         self.copy_button.focus_set()
         warning_kinds = {warning.kind for warning in result.audit.fact_preservation_warnings}
         if "model_input_too_long" in warning_kinds:
@@ -411,6 +439,93 @@ class DesktopApp:
         self.processing_active = False
         self.root.destroy()
 
+    def open_change_preview(self) -> None:
+        """Show a plain-language, side-by-side review without cluttering the main workflow."""
+        source = self.input_text.get("1.0", "end-1c")
+        displayed = self.output_text.get("1.0", "end-1c")
+        if not result_is_current(source, self.processed_source, displayed, self.busy):
+            self.messagebox.showinfo(
+                "Kein aktuelles Ergebnis",
+                "Bitte den aktuellen Ausgangstext zuerst erneut bearbeiten.",
+            )
+            return
+        rewritten = self.generated_result
+        if max(len(source), len(rewritten)) > CHANGE_PREVIEW_MAX_CHARACTERS:
+            self.messagebox.showinfo(
+                "Text sehr lang",
+                "Die farbliche Ansicht ist für Texte bis 200.000 Zeichen verfügbar. "
+                "Der vollständige fertige Text kann weiterhin kopiert oder gespeichert werden.",
+            )
+            return
+
+        preview = build_change_preview(source, rewritten)
+        window = self.tk.Toplevel(self.root)
+        window.title("Änderungen prüfen")
+        window.geometry("1080x700")
+        window.minsize(760, 480)
+        window.transient(self.root)
+
+        outer = self.ttk.Frame(window, padding=18)
+        outer.pack(fill="both", expand=True)
+        self.ttk.Label(
+            outer,
+            text=f"{preview.change_groups} Änderungsbereich(e) · Rot = vorher · Grün = nachher",
+            font=("Segoe UI", 11, "bold"),
+        ).pack(anchor="w", pady=(0, 10))
+        columns = self.ttk.Frame(outer)
+        columns.pack(fill="both", expand=True)
+        columns.columnconfigure(0, weight=1)
+        columns.columnconfigure(1, weight=1)
+        columns.rowconfigure(1, weight=1)
+        self.ttk.Label(columns, text="Original", font=("Segoe UI", 10, "bold")).grid(
+            row=0, column=0, sticky="w", padx=(0, 6)
+        )
+        self.ttk.Label(columns, text="Verbesserung", font=("Segoe UI", 10, "bold")).grid(
+            row=0, column=1, sticky="w", padx=(6, 0)
+        )
+        original_box = self.scrolledtext.ScrolledText(columns, wrap="word", font=("Segoe UI", 10))
+        rewritten_box = self.scrolledtext.ScrolledText(columns, wrap="word", font=("Segoe UI", 10))
+        original_box.grid(row=1, column=0, sticky="nsew", padx=(0, 6), pady=(5, 10))
+        rewritten_box.grid(row=1, column=1, sticky="nsew", padx=(6, 0), pady=(5, 10))
+        original_box.insert("1.0", source)
+        rewritten_box.insert("1.0", rewritten)
+        original_box.tag_configure("changed", background="#ffd9d9", foreground="#7a1111")
+        rewritten_box.tag_configure("changed", background="#d9f5df", foreground="#145c2c")
+        for start, end in preview.original_ranges:
+            original_box.tag_add("changed", f"1.0 + {start} chars", f"1.0 + {end} chars")
+        for start, end in preview.rewritten_ranges:
+            rewritten_box.tag_add("changed", f"1.0 + {start} chars", f"1.0 + {end} chars")
+        original_box.configure(state="disabled")
+        rewritten_box.configure(state="disabled")
+
+        actions = self.ttk.Frame(outer)
+        actions.pack(fill="x")
+        self.ttk.Button(actions, text="Schließen", command=window.destroy).pack(side="right")
+        self.ttk.Button(
+            actions,
+            text="Verbesserung verwenden",
+            command=lambda: self._use_reviewed_text(rewritten, window, improved=True),
+            style="Primary.TButton",
+        ).pack(side="right", padx=(0, 8))
+        self.ttk.Button(
+            actions,
+            text="Original verwenden",
+            command=lambda: self._use_reviewed_text(source, window, improved=False),
+        ).pack(side="right", padx=(0, 8))
+        window.focus_set()
+
+    def _use_reviewed_text(self, text: str, window: object, *, improved: bool) -> None:
+        self.output_text.delete("1.0", "end")
+        self.output_text.insert("1.0", text)
+        self.copy_button.configure(state="normal")
+        self.changes_button.configure(state="normal" if self.generated_result != self.processed_source else "disabled")
+        self.result_status.configure(
+            text="Verbesserung ausgewählt – bereit zum Kopieren."
+            if improved
+            else "Original ausgewählt – bereit zum Kopieren."
+        )
+        window.destroy()
+
     def copy_result(self) -> None:
         source = self.input_text.get("1.0", "end-1c")
         result = self.output_text.get("1.0", "end-1c")
@@ -450,7 +565,9 @@ class DesktopApp:
         self.output_text.delete("1.0", "end")
         self.copy_button.configure(state="disabled")
         self.copy_button.configure(text="Ergebnis kopieren")
+        self.changes_button.configure(state="disabled")
         self.processed_source = None
+        self.generated_result = ""
         if self.result_visible:
             self.result_line.pack_forget()
             self.output_text.pack_forget()
