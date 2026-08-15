@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+from bisect import bisect_left
+from difflib import SequenceMatcher
+from functools import lru_cache
 import re
 import unicodedata
 
+from .inspection import split_sentences
 from .models import SemanticConstraints, ValidationWarning
 from .semantic import DATE, NUMBER, URL, extract_semantics
 
@@ -27,6 +31,59 @@ ASSOCIATION_STOPWORDS = {
     "for", "from", "hat", "haben", "ist", "mit", "the", "this", "to", "von", "war", "was",
     "were", "will", "wird", "with", "zum", "zur",
 }
+
+# These deliberately small, high-confidence pairs catch a dangerous class of
+# edits that exact-value checks cannot see: a model can retain every number,
+# name and negation count while reversing the meaning of a nearly identical
+# claim. They are not a semantic-equivalence engine. Instead they fail closed
+# when an aligned EN/DE business or legal claim crosses an explicit boundary.
+HIGH_RISK_POLARITY_GROUPS: tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...] = (
+    (
+        "permission",
+        (
+            "permit", "permits", "permitted", "allow", "allows", "allowed",
+            "authorize", "authorizes", "authorized", "approve", "approves", "approved",
+            "grant", "grants", "granted", "erlaubt", "zul\u00e4ssig", "genehmigt", "freigegeben",
+        ),
+        (
+            "prohibit", "prohibits", "prohibited", "forbid", "forbids", "forbidden",
+            "ban", "bans", "banned", "reject", "rejects", "rejected", "deny", "denies", "denied",
+            "verbietet", "verboten", "untersagt", "abgelehnt", "verweigert", "unzul\u00e4ssig",
+        ),
+    ),
+    (
+        "effectiveness",
+        ("effective", "valid", "enforceable", "wirksam", "g\u00fcltig"),
+        ("ineffective", "invalid", "unenforceable", "unwirksam", "ung\u00fcltig"),
+    ),
+    (
+        "direction",
+        (
+            "increase", "increases", "increased", "increasing", "rise", "rises", "rose", "rising",
+            "grow", "grows", "grew", "growing", "higher", "steigen", "steigt", "stieg", "gestiegen",
+            "erh\u00f6ht", "erh\u00f6hen", "zunehmen", "nimmt zu",
+        ),
+        (
+            "decrease", "decreases", "decreased", "decreasing", "decline", "declines", "declined",
+            "declining", "fall", "falls", "fell", "falling", "reduce", "reduces", "reduced",
+            "lower", "sinken", "sinkt", "sank", "gesunken", "reduziert", "reduzieren", "abnehmen",
+            "nimmt ab",
+        ),
+    ),
+)
+
+HIGH_RISK_MODAL_GROUPS: tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...] = (
+    (
+        "modal obligation",
+        ("may", "might", "can", "could", "darf", "kann", "k\u00f6nnte"),
+        ("must", "shall", "required to", "is required to", "muss", "m\u00fcssen", "hat zu", "verpflichtet"),
+    ),
+)
+
+CLAIM_TOKEN = re.compile(r"\b[\w\u00c4\u00d6\u00dc\u00e4\u00f6\u00fc\u00df-]+\b", re.UNICODE)
+HIGH_RISK_ALIGNMENT_MINIMUM = 0.55
+HIGH_RISK_POSITION_WINDOW = 3
+HIGH_RISK_MAX_CANDIDATES = 80
 
 
 def _cleanup_artifact_equivalent(text: str) -> str:
@@ -92,6 +149,186 @@ def _reassigned_values(original: str, rewritten: str, values: list[str]) -> list
         if other_score >= 2 and other_score > own_score:
             reassigned.append(value)
     return reassigned
+
+
+@lru_cache(maxsize=None)
+def _marker_pattern(markers: tuple[str, ...]) -> re.Pattern[str]:
+    """Compile each small marker group once, including whitespace-tolerant phrases."""
+    fragments = [
+        re.escape(marker).replace(r"\ ", r"\s+")
+        for marker in sorted(markers, key=len, reverse=True)
+    ]
+    return re.compile(rf"(?<![\w-])(?:{'|'.join(fragments)})(?![\w-])", re.I)
+
+
+def _marker_matches(sentence: str, markers: tuple[str, ...]) -> tuple[str, ...]:
+    """Return explicit high-risk markers without matching inside larger words."""
+    return tuple(match.group(0).casefold() for match in _marker_pattern(markers).finditer(sentence))
+
+
+def _marker_side(
+    sentence: str,
+    left_markers: tuple[str, ...],
+    right_markers: tuple[str, ...],
+) -> tuple[str | None, tuple[str, ...], tuple[str, ...]]:
+    """Classify one unambiguous side of a paired high-risk marker group."""
+    left = _marker_matches(sentence, left_markers)
+    right = _marker_matches(sentence, right_markers)
+    if bool(left) == bool(right):
+        return None, left, right
+    return ("left" if left else "right"), left, right
+
+
+def _claim_tokens(sentence: str) -> tuple[str, ...]:
+    return tuple(token.casefold() for token in CLAIM_TOKEN.findall(sentence))
+
+
+def _alignment_terms(tokens: tuple[str, ...]) -> set[str]:
+    """Use substantive shared words to avoid pairing unrelated nearby sentences."""
+    ignored = ASSOCIATION_STOPWORDS | {
+        "about", "after", "also", "and", "are", "before", "but", "das", "dass", "der", "die",
+        "ein", "eine", "einer", "einem", "einen", "es", "for", "from", "has", "have", "here",
+        "into", "its", "more", "not", "oder", "sein", "sie", "that", "the", "their", "this",
+        "und", "was", "wer", "wie", "with", "wurde", "werden", "which", "will", "wird",
+    }
+    return {term for term in tokens if len(term) >= 4 and term not in ignored}
+
+
+def _candidate_index(sentences: list[str]) -> dict[str, list[int]]:
+    index: dict[str, list[int]] = {}
+    for position, sentence in enumerate(sentences):
+        for term in _alignment_terms(_claim_tokens(sentence)):
+            index.setdefault(term, []).append(position)
+    return index
+
+
+def _nearest_positions(positions: list[int], target: int, maximum: int) -> list[int]:
+    """Return a small proximity window from an already sorted inverted index."""
+    cursor = bisect_left(positions, target)
+    left, right = cursor - 1, cursor
+    selected: list[int] = []
+    while len(selected) < maximum and (left >= 0 or right < len(positions)):
+        left_distance = abs(positions[left] - target) if left >= 0 else float("inf")
+        right_distance = abs(positions[right] - target) if right < len(positions) else float("inf")
+        if left_distance <= right_distance:
+            selected.append(positions[left])
+            left -= 1
+        else:
+            selected.append(positions[right])
+            right += 1
+    return selected
+
+
+def _best_aligned_claim(
+    source_position: int,
+    source_sentence: str,
+    candidates: list[str],
+    index: dict[str, list[int]] | None = None,
+) -> tuple[int, str] | None:
+    """Find a plausibly corresponding rewritten claim without quadratic scans."""
+    if source_position < len(candidates) and source_sentence == candidates[source_position]:
+        return source_position, candidates[source_position]
+    source_tokens = _claim_tokens(source_sentence)
+    positions = set(range(
+        max(0, source_position - HIGH_RISK_POSITION_WINDOW),
+        min(len(candidates), source_position + HIGH_RISK_POSITION_WINDOW + 1),
+    ))
+
+    def score_positions(candidate_positions: set[int]) -> tuple[float, int] | None:
+        scored = []
+        for position in candidate_positions:
+            candidate_tokens = _claim_tokens(candidates[position])
+            score = SequenceMatcher(None, source_tokens, candidate_tokens, autojunk=False).ratio()
+            scored.append((score, -abs(position - source_position), position))
+        if not scored:
+            return None
+        score, _distance, position = max(scored)
+        return score, position
+
+    local = score_positions(positions)
+    # Sentence order usually survives an editorial rewrite. A credible nearby
+    # counterpart is enough; expanding a high-frequency index for it turns
+    # repeated business templates into a quadratic workload.
+    if local is not None and local[0] >= HIGH_RISK_ALIGNMENT_MINIMUM:
+        return local[1], candidates[local[1]]
+
+    if index is None:
+        return None
+
+    for term in sorted(_alignment_terms(source_tokens)):
+        for position in _nearest_positions(index.get(term, []), source_position, 8):
+            positions.add(position)
+            if len(positions) >= HIGH_RISK_MAX_CANDIDATES:
+                break
+        if len(positions) >= HIGH_RISK_MAX_CANDIDATES:
+            break
+    best = score_positions(positions)
+    if best is None or best[0] < HIGH_RISK_ALIGNMENT_MINIMUM:
+        return None
+    position = best[1]
+    return position, candidates[position]
+
+
+def _high_risk_claim_warnings(original: str, rewritten: str) -> list[ValidationWarning]:
+    """Fail closed for high-risk polarity, direction, and modal inversions.
+
+    The comparison is intentionally limited to closely aligned claims. This avoids
+    treating independent mentions of, for example, an approval and a rejection in
+    different sentences as a semantic reversal.
+    """
+    if original == rewritten or _cleanup_artifact_equivalent(original) == rewritten:
+        return []
+    source_claims = split_sentences(original)
+    rewritten_claims = split_sentences(rewritten)
+    if not source_claims or not rewritten_claims:
+        return []
+    warnings: list[ValidationWarning] = []
+    candidate_terms: dict[str, list[int]] | None = None
+    groups = (
+        *(("changed_claim_polarity",) + group for group in HIGH_RISK_POLARITY_GROUPS),
+        *(("changed_modal_obligation",) + group for group in HIGH_RISK_MODAL_GROUPS),
+    )
+    for warning_kind, group_name, left_markers, right_markers in groups:
+        for source_position, source_claim in enumerate(source_claims):
+            source_side, source_left, source_right = _marker_side(source_claim, left_markers, right_markers)
+            if source_side is None:
+                continue
+            aligned = _best_aligned_claim(source_position, source_claim, rewritten_claims)
+            if aligned is None:
+                if candidate_terms is None:
+                    candidate_terms = _candidate_index(rewritten_claims)
+                aligned = _best_aligned_claim(
+                    source_position,
+                    source_claim,
+                    rewritten_claims,
+                    candidate_terms,
+                )
+            if aligned is None:
+                continue
+            _rewritten_position, rewritten_claim = aligned
+            rewritten_side, rewritten_left, rewritten_right = _marker_side(
+                rewritten_claim, left_markers, right_markers
+            )
+            if rewritten_side == source_side:
+                continue
+            before_markers = source_left or source_right
+            after_markers = rewritten_left or rewritten_right
+            before_label = "/".join(before_markers)
+            after_label = "/".join(after_markers) if after_markers else "removed"
+            warnings.append(ValidationWarning(
+                kind=warning_kind,
+                severity="high",
+                value=f"{group_name}: {before_label} -> {after_label}",
+                message=(
+                    "A high-risk polarity, direction, or modal statement changed in a closely aligned claim. "
+                    "The candidate must be reviewed or rejected."
+                ),
+            ))
+            # One confirmed high-severity inversion rejects the candidate. It is
+            # sufficient for a safe fallback and keeps both the audit and the UI
+            # bounded for documents containing repeated template sentences.
+            return warnings
+    return warnings
 
 
 def validate_preservation(original: str, rewritten: str, constraints: SemanticConstraints,
@@ -168,6 +405,8 @@ def validate_preservation(original: str, rewritten: str, constraints: SemanticCo
             kind="altered_uncertainty", severity="high", value="uncertainty",
             message="The number of explicit uncertainty markers changed in the rewrite.",
         ))
+
+    warnings.extend(_high_risk_claim_warnings(original, rewritten))
 
     association_groups = [
         ("numeric", constraints.numbers if preserve_numbers else []),

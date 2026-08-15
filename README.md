@@ -33,8 +33,10 @@ bearbeitet oder prüft das Ergebnis und Strg+Umschalt+C kopiert. Nach einer sich
 Entscheidung springt der Fokus direkt auf **Ergebnis kopieren**.
 Eine verständliche Inhaltsprüfung nennt den tatsächlich geprüften Umfang und zeigt klar,
 ob keine überwachte Abweichung gefunden, eine unsichere Fassung automatisch verworfen
-oder eine Stelle manuell zu kontrollieren ist. Sie weist ausdrücklich darauf hin, dass
-wichtige Texte weiterhin selbst gelesen werden sollten.
+oder eine Stelle manuell zu kontrollieren ist. Sie verwirft zusätzlich eng zugeordnete
+Richtungs-, Freigabe- und Pflichtumkehrungen wie „erlaubt“ zu „verboten“, „steigt“ zu
+„sinkt“ oder „darf“ zu „muss“. Die Prüfung bleibt regelbasiert; wichtige Texte müssen
+weiterhin selbst gelesen werden.
 Vor jeder gründlichen Mistral-Bearbeitung prüft die App die lokale Verbindung nochmals
 höchstens eine halbe Sekunde lang und ohne Textübertragung. Wurde Ollama seit dem Start
 beendet oder ist das Modell nicht mehr bereit, startet sie sofort die sichere lokale
@@ -203,9 +205,11 @@ Each target is replaced atomically so an interrupted write does not leave a part
 
 Deterministic validation can prove exact-string preservation, but it cannot prove full
 semantic equivalence. Any missing protected value, introduced number/date/citation, changed
-negation or uncertainty, altered Markdown structure, or weakly supported claim becomes a
-warning. Unsafe editorial candidates are rejected in favor of conservative local cleanup.
-Publication remains a human editorial decision.
+negation or uncertainty, altered Markdown structure, weakly supported claim, or a detected
+high-risk polarity, direction, permission, effectiveness, or modal-obligation inversion in a
+closely aligned English or German claim becomes a warning. Unsafe editorial candidates are
+rejected in favor of conservative local cleanup. These rule-based checks reduce a known risk;
+publication remains a human editorial decision.
 
 When a document contains multiple protected values, the validator also checks for strong evidence
 that numbers, dates, names, quotations or citations were reassigned between factual contexts—for

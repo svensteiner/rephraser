@@ -50,6 +50,10 @@ def _notice(warning: ValidationWarning) -> str:
     if warning.kind == "model_input_too_long":
         return "Der Text war für einen Modelldurchlauf zu lang; geprüft wurde die lokale Schnellfassung."
     if warning.kind == "rewrite_rejected":
+        if "changed_claim_polarity" in warning.value:
+            return "Eine Fassung mit möglicher Richtungs- oder Bedeutungsumkehr wurde automatisch verworfen."
+        if "changed_modal_obligation" in warning.value:
+            return "Eine Fassung mit möglicher Änderung von Möglichkeit oder Pflicht wurde automatisch verworfen."
         return "Eine möglicherweise inhaltlich veränderte Fassung wurde automatisch verworfen."
     if warning.kind == "user_selected_safe_fallback":
         return "Die sichere lokale Grundbereinigung wurde auf Wunsch sofort verwendet."
@@ -61,6 +65,8 @@ def _notice(warning: ValidationWarning) -> str:
         "altered_markdown_structure": "Markdown-Struktur möglicherweise verändert",
         "missing_or_reassigned_claim": "Aussage möglicherweise entfernt oder verschoben",
         "unsupported_new_claim": "Neue Aussage sollte inhaltlich geprüft werden",
+        "changed_claim_polarity": "Richtung oder Bedeutung einer Aussage möglicherweise umgekehrt",
+        "changed_modal_obligation": "Möglichkeit oder Pflicht einer Aussage möglicherweise verändert",
     }
     label = labels.get(warning.kind)
     if label is None:

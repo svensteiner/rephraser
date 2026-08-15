@@ -15,6 +15,9 @@ def test_windows_bundle_is_onedir_with_matching_version_metadata() -> None:
     assert 'name="TextVerbessern"' in spec
     assert f"StringStruct('ProductVersion', '{__version__}')" in version_info
     assert f"StringStruct('FileVersion', '{__version__}')" in version_info
+    numeric_version = ", ".join((*__version__.split("."), "0"))
+    assert f"filevers=({numeric_version})" in version_info
+    assert f"prodvers=({numeric_version})" in version_info
 
 
 def test_all_public_version_fields_match() -> None:

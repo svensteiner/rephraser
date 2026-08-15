@@ -1,3 +1,5 @@
+import pytest
+
 from app.models import TransformOptions
 from app.pipeline import run_pipeline
 from app.providers.base import EditorialProvider
@@ -61,6 +63,16 @@ class NameDuplicatingStub(EditorialProvider):
 
     def rewrite(self, text, constraints, options):
         return text + " Anna Müller."
+
+
+class CandidateMistralStub(EditorialProvider):
+    name = "mistral-test"
+
+    def __init__(self, candidate: str) -> None:
+        self.candidate = candidate
+
+    def rewrite(self, text, constraints, options):
+        return self.candidate
 
 
 def test_rules_preserve_protected_content_and_umlauts() -> None:
@@ -232,6 +244,47 @@ def test_duplicated_proper_name_is_rejected_by_pipeline() -> None:
     assert result.rewritten_text == text
     rejection = next(w for w in result.audit.fact_preservation_warnings if w.kind == "rewrite_rejected")
     assert "altered_proper_name_count" in rejection.value
+
+
+@pytest.mark.parametrize(
+    ("source", "candidate", "warning_kind"),
+    [
+        (
+            "The contract permits the transfer only with prior written consent.",
+            "The contract prohibits the transfer only with prior written consent.",
+            "changed_claim_polarity",
+        ),
+        (
+            "The control is effective for the reporting period.",
+            "The control is ineffective for the reporting period.",
+            "changed_claim_polarity",
+        ),
+        (
+            "Die Gesellschaft darf die Mittel nur mit Zustimmung verwenden.",
+            "Die Gesellschaft muss die Mittel nur mit Zustimmung verwenden.",
+            "changed_modal_obligation",
+        ),
+        (
+            "Revenue may increase in the next quarter.",
+            "Revenue may decrease in the next quarter.",
+            "changed_claim_polarity",
+        ),
+    ],
+)
+def test_high_risk_claim_inversions_are_rejected_by_pipeline(
+    source: str,
+    candidate: str,
+    warning_kind: str,
+) -> None:
+    result = run_pipeline(
+        source,
+        TransformOptions(provider="rules"),
+        provider=CandidateMistralStub(candidate),
+    )
+    assert result.rewritten_text == source
+    assert result.audit.applied_provider == "rules"
+    rejection = next(warning for warning in result.audit.fact_preservation_warnings if warning.kind == "rewrite_rejected")
+    assert warning_kind in rejection.value
 
 
 def test_long_mistral_input_falls_back_with_truthful_reason_without_network(monkeypatch) -> None:
