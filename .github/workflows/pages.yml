@@ -31,11 +31,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-      - uses: actions/configure-pages@v5
       - name: Test browser editor rules
         run: node --test tests/web_editor.test.mjs
       - name: Test static privacy contract
         run: python tests/test_browser_static.py
+      - uses: actions/configure-pages@v5
       - name: Upload browser edition
         uses: actions/upload-pages-artifact@v4
         with:
