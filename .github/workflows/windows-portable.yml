@@ -37,6 +37,9 @@ jobs:
       - name: Verify offline browser edition
         run: |
           python scripts/build_browser_standalone.py --check
+          # Re-write with canonical LF line endings so the downloadable asset
+          # has the same content hash regardless of the Windows checkout mode.
+          python scripts/build_browser_standalone.py
           node --test tests/web_editor.test.mjs tests/web_standalone.test.mjs
           python tests/test_browser_static.py
       - name: Run desktop self-test

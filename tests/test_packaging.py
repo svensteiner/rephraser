@@ -44,6 +44,7 @@ def test_release_workflow_packages_entire_folder_and_manifest() -> None:
     assert "Published download hash mismatch" in workflow
     assert "TextVerbessern-Browser.html" in workflow
     assert "Verify offline browser edition" in workflow
+    assert "canonical LF line endings" in workflow
     assert "Published browser file hash mismatch" in workflow
     assert "timeout-minutes: 20" in workflow
 
