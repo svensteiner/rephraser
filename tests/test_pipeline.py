@@ -289,6 +289,31 @@ def test_duplicated_proper_name_is_rejected_by_pipeline() -> None:
             "Inactive.",
             "changed_material_status",
         ),
+        (
+            "Austria is the account holder; Belgium is the beneficial owner.",
+            "Belgium is the account holder; Austria is the beneficial owner.",
+            "swapped_material_role_assignments",
+        ),
+        (
+            "Austria is the account holder.",
+            "Belgium holds the account.",
+            "changed_material_role_assignment",
+        ),
+        (
+            "The borrower is Acme.",
+            "Beta took out the loan.",
+            "changed_material_role_assignment",
+        ),
+        (
+            "Austria is the account holder.",
+            "Austria manages the account.",
+            "unverified_material_role_assignment",
+        ),
+        (
+            "Im ersten Quartal betrug der Umsatz EUR 10 Mio.",
+            "Im zweiten Quartal betrug der Umsatz EUR 10 Mio.",
+            "changed_reporting_period",
+        ),
     ],
 )
 def test_high_risk_claim_inversions_are_rejected_by_pipeline(

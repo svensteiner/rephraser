@@ -28,7 +28,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
+  verify:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -41,6 +41,59 @@ jobs:
         run: python tests/test_browser_static.py
       - name: Verify generated offline browser edition
         run: python scripts/build_browser_standalone.py --check
+
+  pages_status:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      pages: read
+    outputs:
+      enabled: ${{ steps.pages.outputs.enabled }}
+    steps:
+      - id: pages
+        name: Check GitHub Pages configuration
+        uses: actions/github-script@v8
+        with:
+          script: |
+            try {
+              const response = await github.rest.repos.getPages({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+              });
+              if (response.data.build_type !== "workflow") {
+                core.setOutput("enabled", "false");
+                core.notice(
+                  "GitHub Pages is enabled but not configured for GitHub Actions. " +
+                    "Browser verification passed; deployment was skipped. Set " +
+                    "Settings > Pages > Source to GitHub Actions to publish."
+                );
+                return;
+              }
+              core.setOutput("enabled", "true");
+              core.notice("GitHub Pages is configured for GitHub Actions; deployment will run.");
+            } catch (error) {
+              if (error.status === 404) {
+                core.setOutput("enabled", "false");
+                core.notice(
+                  "GitHub Pages is not configured. Browser verification passed; deployment " +
+                    "was skipped. Set Settings > Pages > Source to GitHub Actions to publish."
+                );
+                return;
+              }
+              throw error;
+            }
+
+  prepare_pages:
+    if: needs.pages_status.outputs.enabled == 'true'
+    needs: pages_status
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      pages: write
+    steps:
+      - uses: actions/checkout@v6
       - uses: actions/configure-pages@v5
       - name: Upload browser edition
         uses: actions/upload-pages-artifact@v4
@@ -48,11 +101,9 @@ jobs:
           path: web
   deploy:
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-    needs: build
+    needs: [pages_status, prepare_pages]
     runs-on: ubuntu-latest
     permissions:
-      actions: read
-      contents: read
       id-token: write
       pages: write
     environment:

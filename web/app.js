@@ -12,6 +12,7 @@ const elements = {
   source: document.querySelector("#source-text"),
   protectedTerms: document.querySelector("#protected-terms"),
   fileInput: document.querySelector("#file-input"),
+  fileButton: document.querySelector("#file-button"),
   pasteButton: document.querySelector("#paste-button"),
   transformButton: document.querySelector("#transform-button"),
   status: document.querySelector("#status-message"),
@@ -230,6 +231,7 @@ function setTransformBusy(isBusy) {
   elements.source.readOnly = isBusy;
   elements.protectedTerms.readOnly = isBusy;
   elements.pasteButton.disabled = isBusy;
+  elements.fileButton.disabled = isBusy;
   elements.fileInput.disabled = isBusy;
   document.querySelectorAll("input[name='mode']").forEach((input) => {
     input.disabled = isBusy;
@@ -341,6 +343,9 @@ async function loadLocalFile() {
   }
   if (!/\.(txt|md)$/iu.test(file.name)) {
     showError(["Bitte nur eine .txt- oder .md-Datei auswählen."]);
+    // Reset even after a rejected selection so the same corrected file can be
+    // selected again and still emits a change event in every browser.
+    elements.fileInput.value = "";
     return;
   }
   if (file.size > MAX_INPUT_FILE_BYTES) {
@@ -425,7 +430,11 @@ function clearAll() {
   if (isTransforming) {
     return;
   }
-  if ((elements.source.value || elements.resultText.value) && !window.confirm("Eingabe und Ergebnis wirklich leeren?")) {
+  const hasLocalContent = Boolean(
+    elements.source.value || elements.resultText.value || elements.protectedTerms.value,
+  );
+  if (hasLocalContent && !window.confirm("Eingabe, Ergebnis und geschützte Begriffe wirklich leeren?")) {
+    setStatus("Leeren abgebrochen. Dein Text bleibt erhalten.", "ready");
     return;
   }
   inputVersion += 1;
@@ -449,6 +458,11 @@ document.querySelectorAll("input[name='mode']").forEach((input) => input.addEven
 }));
 elements.transformButton.addEventListener("click", runTransformation);
 elements.pasteButton.addEventListener("click", pasteFromClipboard);
+elements.fileButton.addEventListener("click", () => {
+  if (!isTransforming) {
+    elements.fileInput.click();
+  }
+});
 elements.fileInput.addEventListener("change", loadLocalFile);
 elements.copyButton.addEventListener("click", copyResult);
 elements.saveButton.addEventListener("click", saveResult);

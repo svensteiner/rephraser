@@ -1,5 +1,6 @@
 from app.semantic import (
     extract_monetary_amounts,
+    extract_material_role_assignments,
     extract_numeric_table_layouts,
     extract_payment_obligations,
     extract_quantified_values,
@@ -92,6 +93,53 @@ def test_extracts_only_explicit_payment_period_scale_and_table_markers() -> None
     assert [(item.currency, item.amount, item.scale) for item in amounts] == [("eur", "10", "million")]
     assert table[0].headers == ("entity", "q1", "q2")
     assert table[0].cells == (("acme", "q1", ("10",)), ("acme", "q2", ("20",)))
+
+
+def test_extracts_spelled_german_quarters_and_direct_material_role_assignments() -> None:
+    periods = extract_reporting_periods(
+        "Im ersten Quartal, im zweiten Quartal, im dritten Quartal und im vierten Quartal."
+    )
+    english_roles = extract_material_role_assignments(
+        "Austria is the account holder; Belgium is the beneficial owner; "
+        "Acme is the borrower; Beta is the guarantor; CreditCo is the lender; "
+        "Gamma is the legal owner."
+    )
+    german_roles = extract_material_role_assignments(
+        "Österreich ist der Kontoinhaber; Belgien ist der wirtschaftlich Berechtigte."
+    )
+
+    assert periods == ("Q1", "Q2", "Q3", "Q4")
+    assert [(item.role, item.entity) for item in english_roles] == [
+        ("account_holder", "austria"),
+        ("beneficial_owner", "belgium"),
+        ("borrower", "acme"),
+        ("guarantor", "beta"),
+        ("lender", "creditco"),
+        ("legal_owner", "gamma"),
+    ]
+    assert [(item.role, item.entity) for item in german_roles] == [
+        ("account_holder", "österreich"),
+        ("beneficial_owner", "belgien"),
+    ]
+
+
+def test_does_not_guess_an_implicit_material_role_assignment() -> None:
+    text = "Austria discussed the account holder with Belgium."
+    assert extract_material_role_assignments(text) == []
+
+
+def test_extracts_only_narrow_common_material_role_assignment_equivalents() -> None:
+    assignments = extract_material_role_assignments(
+        "Austria holds the account. The loan was taken out by Acme."
+    )
+
+    assert [(item.role, item.entity) for item in assignments] == [
+        ("account_holder", "austria"),
+        ("borrower", "acme"),
+    ]
+    assert extract_material_role_assignments(
+        "Belgium holds a discussion about the account. Beta took out the report."
+    ) == []
 
 
 def test_extracts_written_money_and_narrow_business_quantity_units() -> None:

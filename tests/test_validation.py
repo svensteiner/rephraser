@@ -404,6 +404,73 @@ def test_allows_an_equivalent_explicit_payment_obligation() -> None:
     assert not any(warning.kind == "swapped_payment_obligation_roles" for warning in warnings)
 
 
+@pytest.mark.parametrize(
+    ("original", "rewritten"),
+    [
+        (
+            "Austria is the account holder; Belgium is the beneficial owner.",
+            "Belgium is the account holder; Austria is the beneficial owner.",
+        ),
+        (
+            "Acme is the borrower; Beta is the guarantor.",
+            "Beta is the borrower; Acme is the guarantor.",
+        ),
+        (
+            "Österreich ist der Kontoinhaber; Belgien ist der wirtschaftlich Berechtigte.",
+            "Belgien ist der Kontoinhaber; Österreich ist der wirtschaftlich Berechtigte.",
+        ),
+    ],
+)
+def test_detects_swapped_explicit_material_role_assignments(
+    original: str,
+    rewritten: str,
+) -> None:
+    warnings = validate_preservation(original, rewritten, extract_semantics(original))
+    assert any(warning.kind == "swapped_material_role_assignments" for warning in warnings)
+
+
+def test_detects_changed_explicit_material_role_assignment() -> None:
+    original = "The borrower is Acme."
+    rewritten = "The guarantor is Acme."
+    warnings = validate_preservation(original, rewritten, extract_semantics(original))
+    assert any(warning.kind == "changed_material_role_assignment" for warning in warnings)
+
+
+@pytest.mark.parametrize(
+    ("original", "rewritten"),
+    [
+        ("Austria is the account holder.", "Belgium holds the account."),
+        ("The borrower is Acme.", "Beta took out the loan."),
+    ],
+)
+def test_detects_reassignment_through_a_common_material_role_equivalent(
+    original: str,
+    rewritten: str,
+) -> None:
+    warnings = validate_preservation(original, rewritten, extract_semantics(original))
+    assert any(warning.kind == "changed_material_role_assignment" for warning in warnings)
+
+
+def test_fails_closed_when_a_material_role_assignment_cannot_be_verified() -> None:
+    original = "Austria is the account holder."
+    rewritten = "Austria manages the account."
+    warnings = validate_preservation(original, rewritten, extract_semantics(original))
+    warning = next(
+        warning for warning in warnings if warning.kind == "unverified_material_role_assignment"
+    )
+    assert warning.value == "account_holder: austria"
+
+
+def test_allows_equivalent_explicit_material_role_rephrasing() -> None:
+    original = "Austria is the account holder; Belgium is the beneficial owner."
+    rewritten = "The account holder is Austria; Belgium remains the beneficial owner."
+    warnings = validate_preservation(original, rewritten, extract_semantics(original))
+    assert not any(
+        warning.kind in {"swapped_material_role_assignments", "changed_material_role_assignment"}
+        for warning in warnings
+    )
+
+
 def test_detects_numeric_markdown_table_cell_and_header_order_changes() -> None:
     original = "| Entity | Q1 | Q2 |\n| --- | ---: | ---: |\n| Acme | 10 | 20 |"
     swapped_values = "| Entity | Q1 | Q2 |\n| --- | ---: | ---: |\n| Acme | 20 | 10 |"
@@ -444,6 +511,26 @@ def test_detects_reporting_quarter_and_monetary_scale_changes() -> None:
         warning.kind in {"changed_reporting_period", "changed_monetary_scale"}
         for warning in preserved
     )
+
+
+def test_detects_spelled_german_reporting_quarter_change_and_allows_equivalence() -> None:
+    original = "Im ersten Quartal betrug der Umsatz EUR 10 Mio."
+    changed = validate_preservation(
+        original,
+        "Im zweiten Quartal betrug der Umsatz EUR 10 Mio.",
+        extract_semantics(original),
+    )
+    equivalent = validate_preservation(
+        original,
+        "Im Q1 betrug der Umsatz EUR 10 Mio.",
+        extract_semantics(original),
+    )
+
+    assert any(
+        warning.kind == "changed_reporting_period" and warning.value == "Q1 -> Q2"
+        for warning in changed
+    )
+    assert not any(warning.kind == "changed_reporting_period" for warning in equivalent)
 
 
 def test_high_risk_guard_skips_claim_work_for_identical_content(monkeypatch: pytest.MonkeyPatch) -> None:

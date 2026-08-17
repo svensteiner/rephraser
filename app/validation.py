@@ -13,6 +13,7 @@ from .semantic import (
     NUMBER,
     URL,
     extract_monetary_amounts,
+    extract_material_role_assignments,
     extract_numeric_table_layouts,
     extract_payment_obligations,
     extract_quantified_values,
@@ -679,6 +680,87 @@ def _payment_role_swap_warning(original: str, rewritten: str) -> ValidationWarni
     return None
 
 
+def _material_role_assignment_warning(original: str, rewritten: str) -> ValidationWarning | None:
+    """Reject a clear exchange or reassignment of high-impact stated roles.
+
+    A source assignment is material precisely because it is direct and
+    unambiguous.  If the candidate has no recognized equivalent, the validator
+    must fail closed rather than treating an unsupported paraphrase as safe.
+    The extractor includes a small set of exact common equivalents, but unknown
+    grammar remains review-only instead of being guessed from nearby entities.
+    """
+    source_assignments = set(extract_material_role_assignments(original))
+    if not source_assignments:
+        return None
+    rewritten_assignments = set(extract_material_role_assignments(rewritten))
+    if not rewritten_assignments:
+        source_label = "; ".join(
+            f"{assignment.role}: {assignment.entity}"
+            for assignment in sorted(source_assignments, key=lambda item: (item.role, item.entity))
+        )
+        return ValidationWarning(
+            kind="unverified_material_role_assignment",
+            severity="high",
+            value=source_label,
+            message=(
+                "A directly stated high-impact role assignment could not be verified in "
+                "the candidate. The candidate must be reviewed or rejected."
+            ),
+        )
+    if source_assignments == rewritten_assignments:
+        return None
+
+    source_roles = {assignment.role for assignment in source_assignments}
+    rewritten_roles = {assignment.role for assignment in rewritten_assignments}
+    source_entities = {assignment.entity for assignment in source_assignments}
+    rewritten_entities = {assignment.entity for assignment in rewritten_assignments}
+
+    # The same explicit roles and entities with a different mapping is the
+    # strongest evidence of a role swap (including two-way owner/holder and
+    # borrower/guarantor exchanges).  It avoids guessing at a relationship from
+    # mere co-occurrence of names and role labels.
+    if (
+        len(source_roles) >= 2
+        and source_roles == rewritten_roles
+        and source_entities == rewritten_entities
+    ):
+        return ValidationWarning(
+            kind="swapped_material_role_assignments",
+            severity="high",
+            value=" / ".join(sorted(source_roles)),
+            message=(
+                "Explicit material roles were assigned to different entities. "
+                "The candidate must be reviewed or rejected."
+            ),
+        )
+
+    source_by_role = {
+        role: {assignment.entity for assignment in source_assignments if assignment.role == role}
+        for role in source_roles
+    }
+    rewritten_by_role = {
+        role: {assignment.entity for assignment in rewritten_assignments if assignment.role == role}
+        for role in rewritten_roles
+    }
+    for role in sorted(source_roles | rewritten_roles):
+        before = source_by_role.get(role, set())
+        after = rewritten_by_role.get(role, set())
+        if before == after:
+            continue
+        before_label = ", ".join(sorted(before)) or "absent"
+        after_label = ", ".join(sorted(after)) or "absent"
+        return ValidationWarning(
+            kind="changed_material_role_assignment",
+            severity="high",
+            value=f"{role}: {before_label} -> {after_label}",
+            message=(
+                "An explicit high-impact role assignment changed. "
+                "The candidate must be reviewed or rejected."
+            ),
+        )
+    return None
+
+
 def _global_reporting_period_warning(original: str, rewritten: str) -> ValidationWarning | None:
     """Handle a single explicit period even if sentence tokenization splits it."""
     source_periods = extract_reporting_periods(original)
@@ -794,6 +876,9 @@ def _high_risk_claim_warnings(original: str, rewritten: str) -> list[ValidationW
     table_layout = _table_numeric_layout_warning(original, rewritten)
     if table_layout is not None:
         return [table_layout]
+    material_role_assignment = _material_role_assignment_warning(original, rewritten)
+    if material_role_assignment is not None:
+        return [material_role_assignment]
     payment_role_swap = _payment_role_swap_warning(original, rewritten)
     if payment_role_swap is not None:
         return [payment_role_swap]

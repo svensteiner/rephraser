@@ -76,8 +76,27 @@ _REPORTING_PERIOD_PATTERNS = (
     re.compile(r"\bQ([1-4])\b", re.I),
     re.compile(r"\b([1-4])\.\s*Quartal\b", re.I),
     re.compile(r"\b(first|second|third|fourth)\s+quarter\b", re.I),
+    # German reporting references are often written out and inflected, for
+    # example ``im ersten Quartal`` or ``des vierten Quartals``.  They carry
+    # the same business meaning as Q1–Q4, so leaving them unrecognised would
+    # let a rewrite exchange one quarter for another without this guard seeing
+    # the change.
+    re.compile(
+        r"\b(erst(?:e|en|em|er|es)|zweit(?:e|en|em|er|es)|"
+        r"dritt(?:e|en|em|er|es)|viert(?:e|en|em|er|es))\s+Quartal(?:s)?\b",
+        re.I,
+    ),
 )
-_ORDINAL_QUARTERS = {"first": "Q1", "second": "Q2", "third": "Q3", "fourth": "Q4"}
+_ORDINAL_QUARTERS = {
+    "first": "Q1",
+    "second": "Q2",
+    "third": "Q3",
+    "fourth": "Q4",
+    **{form: "Q1" for form in ("erste", "ersten", "erstem", "erster", "erstes")},
+    **{form: "Q2" for form in ("zweite", "zweiten", "zweitem", "zweiter", "zweites")},
+    **{form: "Q3" for form in ("dritte", "dritten", "drittem", "dritter", "drittes")},
+    **{form: "Q4" for form in ("vierte", "vierten", "viertem", "vierter", "viertes")},
+}
 _MONETARY_AMOUNT_PATTERNS = (
     re.compile(
         rf"(?P<currency>{_CURRENCY})\s*(?P<amount>{_MONEY_NUMBER})\s*(?P<scale>{_MONEY_SCALE})(?![\w])",
@@ -96,12 +115,128 @@ _QUANTIFIED_VALUE_PATTERN = re.compile(
 _TABLE_SEPARATOR = re.compile(r":?-{3,}:?")
 
 
+# These extractors intentionally recognize only direct, explicit assignments
+# for business/legal roles that are particularly harmful when exchanged.  They
+# do not try to infer roles from general prose.  A few narrow active/passive
+# equivalents are included for common account-holder and borrower wording; the
+# grammar remains deliberately constrained so a mere name/role co-occurrence
+# is never treated as an assignment.
+_ROLE_ASSIGNMENT_END = r"(?=\s*(?:[,;:.!?)]|$|\r?\n))"
+_MATERIAL_ROLE_SPECS: tuple[tuple[str, str, str, str], ...] = (
+    ("account_holder", r"account\s+holders?", r"is|remains", r"the|a|an"),
+    ("beneficial_owner", r"beneficial\s+owners?", r"is|remains", r"the|a|an"),
+    ("legal_owner", r"legal\s+owners?", r"is|remains", r"the|a|an"),
+    ("borrower", r"borrowers?", r"is|remains", r"the|a|an"),
+    ("lender", r"lenders?", r"is|remains", r"the|a|an"),
+    ("guarantor", r"guarantors?", r"is|remains", r"the|a|an"),
+    ("account_holder", r"kontoinhaber(?:in)?", r"ist|bleibt", r"der|die|das|ein(?:e|er|em|en|es)?"),
+    (
+        "beneficial_owner",
+        r"wirtschaftlich(?:e|er|en|em)?\s+berechtigt(?:e|er|en|em)?",
+        r"ist|bleibt",
+        r"der|die|das|ein(?:e|er|em|en|es)?",
+    ),
+    (
+        "legal_owner",
+        r"rechtlich(?:e|er|en|em)?\s+eigentümer(?:in)?",
+        r"ist|bleibt",
+        r"der|die|das|ein(?:e|er|em|en|es)?",
+    ),
+    ("borrower", r"(?:darlehens|kredit)nehmer(?:in)?", r"ist|bleibt", r"der|die|das|ein(?:e|er|em|en|es)?"),
+    ("lender", r"(?:darlehens|kredit)geber(?:in)?", r"ist|bleibt", r"der|die|das|ein(?:e|er|em|en|es)?"),
+    ("guarantor", r"(?:bürge|bürgin)", r"ist|bleibt", r"der|die|das|ein(?:e|er|em|en|es)?"),
+)
+
+
+def _material_role_assignment_patterns() -> tuple[tuple[str, re.Pattern[str]], ...]:
+    """Compile narrowly explicit material-role assignment forms once."""
+    patterns: list[tuple[str, re.Pattern[str]]] = []
+    for canonical_role, role, verbs, articles in _MATERIAL_ROLE_SPECS:
+        role_token = rf"(?i:{role})"
+        verb_token = rf"(?i:{verbs})"
+        article_token = rf"(?i:{articles})"
+        optional_article = rf"(?:(?:{article_token})\s+)?"
+        patterns.extend(
+            (
+                (
+                    canonical_role,
+                    re.compile(
+                        rf"\b(?P<entity>{_ENTITY})\s+{verb_token}\s+"
+                        rf"{optional_article}{role_token}{_ROLE_ASSIGNMENT_END}"
+                    ),
+                ),
+                (
+                    canonical_role,
+                    re.compile(
+                        rf"\b{optional_article}{role_token}\s+{verb_token}\s+"
+                        rf"(?P<entity>{_ENTITY}){_ROLE_ASSIGNMENT_END}"
+                    ),
+                ),
+                (
+                    canonical_role,
+                    re.compile(
+                        rf"\b{role_token}\s*:\s*(?P<entity>{_ENTITY}){_ROLE_ASSIGNMENT_END}"
+                    ),
+                ),
+            )
+        )
+    # A limited set of ordinary phrasing variants is safe to normalize to an
+    # assignment because both the action and the object are explicit.  Do not
+    # loosen these to generic ``holds``, ``owns``, or ``took out`` patterns:
+    # those verbs alone do not establish the high-impact role reliably.
+    patterns.extend(
+        (
+            (
+                "account_holder",
+                re.compile(
+                    rf"\b(?P<entity>{_ENTITY})\s+(?i:holds?)\s+"
+                    rf"(?i:the)\s+(?i:accounts?){_ROLE_ASSIGNMENT_END}"
+                ),
+            ),
+            (
+                "account_holder",
+                re.compile(
+                    rf"\b(?i:the)\s+(?i:accounts?)\s+(?i:is|are)\s+"
+                    rf"(?i:held)\s+(?i:by)\s+(?P<entity>{_ENTITY}){_ROLE_ASSIGNMENT_END}"
+                ),
+            ),
+            (
+                "borrower",
+                re.compile(
+                    rf"\b(?P<entity>{_ENTITY})\s+(?i:took|has\s+taken)\s+"
+                    rf"(?i:out)\s+(?i:the|a)\s+(?i:loans?|credits?){_ROLE_ASSIGNMENT_END}"
+                ),
+            ),
+            (
+                "borrower",
+                re.compile(
+                    rf"\b(?i:the|a)\s+(?i:loans?|credits?)\s+(?i:was|were)\s+"
+                    rf"(?i:taken)\s+(?i:out)\s+(?i:by)\s+(?P<entity>{_ENTITY})"
+                    rf"{_ROLE_ASSIGNMENT_END}"
+                ),
+            ),
+        )
+    )
+    return tuple(patterns)
+
+
+_MATERIAL_ROLE_ASSIGNMENT_PATTERNS = _material_role_assignment_patterns()
+
+
 @dataclass(frozen=True)
 class PaymentObligation:
     """A narrowly recognised payer-to-recipient obligation."""
 
     payer: str
     payee: str
+
+
+@dataclass(frozen=True)
+class MaterialRoleAssignment:
+    """A directly stated high-impact business or legal role assignment."""
+
+    role: str
+    entity: str
 
 
 @dataclass(frozen=True)
@@ -230,6 +365,31 @@ def extract_payment_obligations(text: str) -> list[PaymentObligation]:
             if relation not in relations:
                 relations.append(relation)
     return relations
+
+
+def extract_material_role_assignments(text: str) -> list[MaterialRoleAssignment]:
+    """Return only direct assignments for a small set of material roles.
+
+    A role is emitted only when the text uses one of three clear forms, such as
+    ``Austria is the account holder``, ``The borrower is Acme``, or
+    ``Guarantor: Beta``.  It also recognizes a few exact equivalents such as
+    ``Austria holds the account`` and ``Acme took out the loan``.  This is
+    deliberately not a general entity-role NLP extractor: uncertain wording
+    is left for human review rather than guessed.
+    """
+    matched_assignments: list[tuple[int, int, MaterialRoleAssignment]] = []
+    for role, pattern in _MATERIAL_ROLE_ASSIGNMENT_PATTERNS:
+        for match in pattern.finditer(text):
+            entity = _normalise_semantic_text(match.group("entity").strip(".,;:"))
+            if not entity:
+                continue
+            assignment = MaterialRoleAssignment(role=role, entity=entity)
+            matched_assignments.append((match.start(), match.end(), assignment))
+    assignments: list[MaterialRoleAssignment] = []
+    for _start, _end, assignment in sorted(matched_assignments, key=lambda item: item[:2]):
+        if assignment not in assignments:
+            assignments.append(assignment)
+    return assignments
 
 
 def extract_reporting_periods(text: str) -> tuple[str, ...]:

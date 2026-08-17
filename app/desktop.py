@@ -307,7 +307,10 @@ class DesktopApp:
         top_line = ttk.Frame(outer)
         top_line.pack(fill="x")
         ttk.Label(top_line, text="Dein Text", font=self.body_bold_font).pack(side="left")
-        ttk.Button(top_line, text="Datei öffnen", command=self.open_file, style="Secondary.TButton").pack(side="right")
+        self.open_file_button = ttk.Button(
+            top_line, text="Datei öffnen", command=self.open_file, style="Secondary.TButton"
+        )
+        self.open_file_button.pack(side="right")
         self.paste_button = ttk.Button(
             top_line,
             text="Aus Zwischenablage einfügen",
@@ -618,6 +621,8 @@ class DesktopApp:
         self._update_source_state()
 
     def paste_clipboard(self) -> None:
+        if not self._source_replacement_allowed():
+            return
         try:
             content = self.root.clipboard_get()
         except self.tk.TclError:
@@ -722,7 +727,31 @@ class DesktopApp:
         self.input_text.configure(state="normal")
         self.mode_box.configure(state="readonly")
         self.protected_terms_button.configure(state="normal")
+        self._set_source_entry_controls("normal")
         self._refresh_mistral_controls()
+
+    def _set_source_entry_controls(self, state: str) -> None:
+        """Keep file and clipboard replacement unavailable while input is immutable."""
+        for attribute in ("paste_button", "open_file_button"):
+            control = getattr(self, attribute, None)
+            if control is not None:
+                control.configure(state=state)
+
+    def _source_replacement_allowed(self) -> bool:
+        """Refuse input replacement during a background run, including keyboard shortcuts."""
+        if not getattr(self, "busy", False):
+            return True
+        if getattr(self, "processing_active", False):
+            message = (
+                "Bearbeitung läuft. Wählen Sie „Sichere Fassung jetzt“ oder warten Sie, "
+                "bevor Sie Eingabe oder Datei wechseln."
+            )
+        else:
+            message = "Die aktuelle Bearbeitung wird gerade abgeschlossen. Bitte warten Sie kurz."
+        status = getattr(self, "result_status", None)
+        if status is not None:
+            status.configure(text=message)
+        return False
 
     def _handle_escape(self) -> None:
         """Provide a keyboard-safe exit from the two deliberate editing states."""
@@ -732,7 +761,11 @@ class DesktopApp:
             self.discard_manual_edits()
 
     def open_file(self) -> None:
+        if not self._source_replacement_allowed():
+            return
         path = self.filedialog.askopenfilename(
+            parent=self.root,
+            title="Textdatei öffnen",
             filetypes=(("Textdatei", "*.txt"), ("Markdown-Datei", "*.md")),
         )
         if not path:
@@ -744,6 +777,12 @@ class DesktopApp:
             self.messagebox.showerror(error.title, str(error))
             return
         self._set_source_text(content)
+        status = getattr(self, "result_status", None)
+        if status is not None:
+            status.configure(text=f"Datei „{candidate.name}“ geöffnet – bereit zum Bearbeiten.")
+        input_text = getattr(self, "input_text", None)
+        if input_text is not None:
+            input_text.focus_set()
 
     def start_processing(self) -> None:
         if self.busy:
@@ -791,6 +830,7 @@ class DesktopApp:
         self.input_text.configure(state="disabled")
         self.mode_box.configure(state="disabled")
         self.protected_terms_button.configure(state="disabled")
+        self._set_source_entry_controls("disabled")
         provider, strength = (
             ("rules", "light")
             if fallback_kind is not None

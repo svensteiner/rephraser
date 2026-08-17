@@ -15,6 +15,7 @@ class FakeElement {
     this.files = [];
     this.children = [];
     this.listeners = new Map();
+    this.clickCount = 0;
   }
 
   get firstChild() {
@@ -55,6 +56,7 @@ class FakeElement {
   scrollIntoView() {}
 
   click() {
+    this.clickCount += 1;
     return this.emit("click");
   }
 
@@ -63,7 +65,7 @@ class FakeElement {
 
 function createBrowserHarness() {
   const ids = [
-    "source-text", "protected-terms", "file-input", "paste-button", "transform-button",
+    "source-text", "protected-terms", "file-input", "file-button", "paste-button", "transform-button",
     "status-message", "error-message", "character-count", "mode-help", "result-section",
     "result-heading", "original-preview", "result-text", "before-stats", "after-stats",
     "change-list", "character-findings", "copy-button", "save-button", "audit-button",
@@ -211,6 +213,32 @@ test("browser transformation completes when animation frames are paused", { conc
   });
 });
 
+test("browser file opening is keyboard-reachable through a real button and resets rejected selections", { concurrency: false }, async () => {
+  await withBrowserHarness(async ({ elements }) => {
+    await elements["file-button"].emit("click");
+    assert.equal(elements["file-input"].clickCount, 1);
+
+    elements["file-input"].value = "notiz.pdf";
+    elements["file-input"].files = [{ name: "notiz.pdf", size: 12 }];
+    await elements["file-input"].emit("change");
+
+    assert.equal(elements["file-input"].value, "");
+    assert.match(elements["error-message"].textContent, /\.txt.*\.md/u);
+  });
+});
+
+test("browser clear keeps protected terms when the confirmation is declined", { concurrency: false }, async () => {
+  await withBrowserHarness(async ({ elements, window }) => {
+    elements["protected-terms"].value = "Project Aurora";
+    window.confirm = () => false;
+
+    await elements["clear-button"].emit("click");
+
+    assert.equal(elements["protected-terms"].value, "Project Aurora");
+    assert.match(elements["status-message"].textContent, /abgebrochen/u);
+  });
+});
+
 test("browser discards rAF results when source, mode, or protected terms change", { concurrency: false }, async () => {
   const changes = [
     async ({ elements }) => {
@@ -235,6 +263,7 @@ test("browser discards rAF results when source, mode, or protected terms change"
       await Promise.resolve();
       assert.equal(harness.elements["source-text"].readOnly, true);
       assert.equal(harness.modeInputs[0].disabled, true);
+      assert.equal(harness.elements["file-button"].disabled, true);
       assert.equal(harness.elements["clear-button"].disabled, true);
 
       await change(harness);

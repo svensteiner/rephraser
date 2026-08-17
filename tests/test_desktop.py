@@ -390,16 +390,39 @@ def test_open_file_limits_picker_to_supported_text_types_and_loads_utf8(tmp_path
         def showerror(self, *_args: object) -> None:
             raise AssertionError("valid text file must not show an error")
 
+    class Input:
+        def __init__(self) -> None:
+            self.focused = False
+
+        def focus_set(self) -> None:
+            self.focused = True
+
+    class Status:
+        def __init__(self) -> None:
+            self.text = ""
+
+        def configure(self, *, text: str) -> None:
+            self.text = text
+
     app = DesktopApp.__new__(DesktopApp)
     app.filedialog = FileDialog()
     app.messagebox = MessageBox()
+    app.root = object()
+    app.input_text = Input()
+    app.result_status = Status()
     loaded: list[str] = []
     app._set_source_text = loaded.append
 
     app.open_file()
 
-    assert app.filedialog.calls == [{"filetypes": (("Textdatei", "*.txt"), ("Markdown-Datei", "*.md"))}]
+    assert app.filedialog.calls == [{
+        "parent": app.root,
+        "title": "Textdatei öffnen",
+        "filetypes": (("Textdatei", "*.txt"), ("Markdown-Datei", "*.md")),
+    }]
     assert loaded == ["Grüße aus Wien"]
+    assert app.input_text.focused is True
+    assert app.result_status.text == "Datei „Brief.TXT“ geöffnet – bereit zum Bearbeiten."
 
 
 def test_open_file_rejects_unsupported_and_oversized_files_before_reading(monkeypatch, tmp_path) -> None:
@@ -437,6 +460,7 @@ def test_open_file_rejects_unsupported_and_oversized_files_before_reading(monkey
         app = DesktopApp.__new__(DesktopApp)
         app.filedialog = FileDialog(path)
         app.messagebox = MessageBox()
+        app.root = object()
         app._set_source_text = source_must_not_change
         app.open_file()
         return app.messagebox.errors, list(read_attempts)
@@ -447,6 +471,63 @@ def test_open_file_rejects_unsupported_and_oversized_files_before_reading(monkey
     assert unsupported_errors[0][0] == "Dateityp nicht unterstützt"
     assert oversized_errors[0][0] == "Datei zu groß"
     assert attempts == []
+
+
+def test_busy_desktop_refuses_file_or_clipboard_replacement_before_opening_anything() -> None:
+    from app.desktop import DesktopApp
+
+    class Status:
+        def __init__(self) -> None:
+            self.text = ""
+
+        def configure(self, *, text: str) -> None:
+            self.text = text
+
+    class FileDialog:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def askopenfilename(self, **_kwargs: object) -> str:
+            self.calls += 1
+            return ""
+
+    class Root:
+        def clipboard_get(self) -> str:
+            raise AssertionError("clipboard must not be read while processing")
+
+    app = DesktopApp.__new__(DesktopApp)
+    app.busy = True
+    app.processing_active = True
+    app.result_status = Status()
+    app.filedialog = FileDialog()
+    app.root = Root()
+
+    app.open_file()
+    app.paste_clipboard()
+
+    assert app.filedialog.calls == 0
+    assert "Sichere Fassung jetzt" in app.result_status.text
+
+
+def test_source_entry_controls_are_disabled_while_the_input_is_immutable() -> None:
+    from app.desktop import DesktopApp
+
+    class Widget:
+        def __init__(self) -> None:
+            self.states: list[str] = []
+
+        def configure(self, *, state: str) -> None:
+            self.states.append(state)
+
+    app = DesktopApp.__new__(DesktopApp)
+    app.paste_button = Widget()
+    app.open_file_button = Widget()
+
+    app._set_source_entry_controls("disabled")
+    app._set_source_entry_controls("normal")
+
+    assert app.paste_button.states == ["disabled", "normal"]
+    assert app.open_file_button.states == ["disabled", "normal"]
 
 
 def test_preflight_and_reader_return_clear_local_errors_for_unreadable_content(tmp_path) -> None:

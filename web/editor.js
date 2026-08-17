@@ -6,7 +6,7 @@
  * browser wrapper around a language model.
  */
 
-export const BROWSER_EDITION_VERSION = "1.2.0";
+export const BROWSER_EDITION_VERSION = "1.3.0";
 export const MAX_INPUT_CHARACTERS = 2_000_000;
 export const MAX_PROTECTED_TERMS = 50;
 export const MAX_PROTECTED_TERM_LENGTH = 100;
