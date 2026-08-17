@@ -18,6 +18,7 @@ const elements = {
   error: document.querySelector("#error-message"),
   characterCount: document.querySelector("#character-count"),
   resultSection: document.querySelector("#result-section"),
+  resultHeading: document.querySelector("#result-heading"),
   originalPreview: document.querySelector("#original-preview"),
   resultText: document.querySelector("#result-text"),
   beforeStats: document.querySelector("#before-stats"),
@@ -122,7 +123,7 @@ function renderFindings(result) {
     const title = document.createElement("strong");
     title.textContent = `${finding.code_point} · ${finding.name}`;
     const description = document.createElement("span");
-    const positions = finding.positions.length ? `Positionen: ${finding.positions.join(", ")}${finding.positions_truncated ? " …" : ""}` : "";
+    const positions = finding.positions.length ? `Positionen (ab 1): ${finding.positions.join(", ")}${finding.positions_truncated ? " …" : ""}` : "";
     description.textContent = `${finding.kind} · ${formatNumber(finding.count)}×${positions ? ` · ${positions}` : ""}`;
     item.append(title, description);
     elements.characterFindings.append(item);
@@ -140,6 +141,7 @@ function renderResult(result) {
   elements.resultSection.hidden = false;
   const behavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
   elements.resultSection.scrollIntoView({ behavior, block: "start" });
+  elements.resultHeading.focus({ preventScroll: true });
   const modeDescription = result.mode === MODE_FAST ? "Schnellfassung" : "Formatbereinigung";
   setStatus(`${modeDescription} fertig. Bitte Ergebnis vor dem Verwenden lesen.`, "ready");
 }

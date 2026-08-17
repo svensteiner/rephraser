@@ -19,9 +19,13 @@
         <p class="hero-copy">Für schnelle, lokale Bereinigung auf einem gesperrten PC – ohne Installation.</p>
         <div class="privacy-banner" role="status">
           <span aria-hidden="true">✓</span>
-          <span><strong>Läuft nur in diesem Browser-Tab.</strong> Dein eingegebener Text wird nicht an GitHub oder andere Dienste übertragen.</span>
+          <span><strong>Diese Anwendung verarbeitet deinen Text lokal.</strong> Sie sendet ihn nicht an GitHub oder eine Cloud-API. Browser, Betriebssystem und Erweiterungen können eigene Einstellungen haben.</span>
         </div>
       </header>
+
+      <noscript>
+        <p class="error-message">Diese lokale Ausgabe benötigt JavaScript. Bitte JavaScript für diese Datei aktivieren oder die Desktop-Ausgabe verwenden.</p>
+      </noscript>
 
       <section class="workspace" aria-labelledby="input-heading">
         <div class="section-heading">
@@ -37,7 +41,7 @@
         </div>
 
         <label class="visually-hidden" for="source-text">Text zum Verbessern</label>
-        <textarea id="source-text" class="text-field input-field" placeholder="Text hier einfügen …" spellcheck="true" aria-describedby="input-help character-count"></textarea>
+        <textarea id="source-text" class="text-field input-field" placeholder="Text hier einfügen …" spellcheck="false" autocomplete="off" aria-describedby="input-help character-count"></textarea>
         <div class="input-footer">
           <p id="input-help">Maximal 2.000.000 Zeichen. Dateien werden nur in diesem Browser gelesen.</p>
           <p id="character-count" aria-live="polite">0 Zeichen</p>
@@ -67,7 +71,7 @@
           <summary>Begriffe schützen <span>optional</span></summary>
           <p>Ein exakter Begriff pro Zeile, z.&nbsp;B. ein Projekt- oder Produktname. Fehlt ein Begriff im Ausgangstext, wird nichts verändert.</p>
           <label class="visually-hidden" for="protected-terms">Geschützte Begriffe</label>
-          <textarea id="protected-terms" class="protect-input" rows="4" placeholder="Project Aurora&#10;Kontenabstimmung"></textarea>
+          <textarea id="protected-terms" class="protect-input" rows="4" placeholder="Project Aurora&#10;Kontenabstimmung" spellcheck="false" autocomplete="off"></textarea>
         </details>
 
         <div class="primary-row">
@@ -81,7 +85,7 @@
         <div class="section-heading result-heading">
           <div>
             <p class="step">3</p>
-            <h2 id="result-heading">Fertiger Text</h2>
+            <h2 id="result-heading" tabindex="-1">Fertiger Text</h2>
           </div>
           <div class="header-actions">
             <button class="button button-secondary" id="copy-button" type="button">Ergebnis kopieren</button>
@@ -125,7 +129,7 @@
       <section class="limits" id="privacy" aria-labelledby="limits-heading">
         <h2 id="limits-heading">Datenschutz &amp; Grenzen</h2>
         <div class="limits-grid">
-          <p><strong>Was nicht übertragen wird:</strong> Eingabe, Ergebnis und geöffnete Dateien werden nicht an diese Website gesendet. GitHub Pages liefert nur die Programmdateien aus. Zwischenablage und Downloads folgen den Einstellungen deines Browsers und Betriebssystems.</p>
+          <p><strong>Was die Anwendung nicht macht:</strong> Sie sendet Eingabe, Ergebnis und geöffnete Dateien nicht an diese Website, GitHub oder eine Cloud-API. GitHub Pages liefert nur die Programmdateien aus. Browser, Betriebssystem und Erweiterungen können eigene Einstellungen für Zwischenablage, Downloads oder Formularwiederherstellung haben.</p>
           <p><strong>Was diese Ausgabe kann:</strong> Feste, nachvollziehbare Bereinigung und kleine Formulierungsglättungen. Sie verwendet kein Mistral-Modell und keine Cloud-API.</p>
           <p><strong>Wichtig:</strong> Die Browser-Ausgabe ist kein Beweis für gleiche Bedeutung. Bitte wichtige Texte vor dem Versenden selbst lesen.</p>
           <p><strong>Keine Herkunftsbewertung:</strong> Das Werkzeug bewertet oder umgeht keine KI-Provenienz- oder Watermarking-Systeme.</p>

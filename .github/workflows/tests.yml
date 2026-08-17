@@ -3,6 +3,10 @@ name: Tests
 on:
   push:
   pull_request:
+  schedule:
+    # Daily regression check; it only tests the repository and never publishes or edits text.
+    - cron: "17 04 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -21,7 +25,12 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
       - run: python -m pip install -e ".[dev,ui]"
       - run: python -m pytest -q
+      - name: Run browser-edition tests
+        run: node --test tests/web_editor.test.mjs tests/web_standalone.test.mjs
       - name: Run DE/EN editorial quality gate
         run: python -m app.evaluation

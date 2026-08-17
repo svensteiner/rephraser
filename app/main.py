@@ -13,7 +13,7 @@ from .models import TransformRequest, TransformResult
 from .pipeline import run_pipeline
 from .providers.base import ProviderError
 
-app = FastAPI(title="Editorial Transformer", version="1.14.0",
+app = FastAPI(title="Editorial Transformer", version="1.15.0",
     description="Local-first editorial rewriting and semantic-preservation auditing. No AI detector score.")
 
 

@@ -74,7 +74,11 @@ def _read_runtime_tags_with_deadline(base_url: str, timeout: float) -> bytes | N
 
     def request_worker() -> None:
         try:
-            opener = urllib.request.build_opener(NoRedirect)
+            # Do not inherit HTTP(S)_PROXY/ALL_PROXY or operating-system proxy
+            # settings.  Even a loopback URL must not be offered to an ambient
+            # proxy before this module has a chance to enforce its local-only
+            # contract.
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect)
             with opener.open(base_url + "/api/tags", timeout=deadline) as response:
                 active_response["value"] = response
                 # The main thread can reach its deadline while ``open`` is still

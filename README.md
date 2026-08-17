@@ -64,7 +64,7 @@ enthält keinerlei Text- oder Dokumentdaten.
 einem bewussten Klick. Es gibt keine automatische Update-Abfrage und dabei werden keine
 Text- oder Dokumentinhalte übertragen.
 
-Die Browser-Oberfläche zeigt nach der Bearbeitung **Original und Ergebnis nebeneinander**.
+Die lokale Streamlit-Oberfläche zeigt nach der Bearbeitung **Original und Ergebnis nebeneinander**.
 Unter **Bearbeitung anpassen** lassen sich Sprache sowie der exakte Schutz von Zahlen,
 Daten, Quellen, Links, wörtlichen Zitaten und eigenen Fachbegriffen einstellen. Eigennamen und
 Tatsachenbehauptungen werden immer geprüft. Der Bereich **Änderungen und Prüfung**
@@ -79,16 +79,30 @@ kann Windows beim ersten Start eine Sicherheitsabfrage anzeigen.
 
 ## Browser-Ausgabe ohne Installation
 
-Für einen gesperrten oder fremden PC steht zusätzlich die statische
-[Browser-Ausgabe](https://svensteiner.github.io/rephraser/) bereit. Sie läuft nach dem
-Aufruf direkt im Browser und benötigt weder Python noch eine Installation.
+Für einen gesperrten oder fremden PC gibt es zwei Wege ohne Python oder Installation.
 
-Die Seite lädt ihre Programmdateien von GitHub Pages; eingefügter Text, geöffnete
-Dateien und das Ergebnis werden von der Anwendung nicht übertragen. Es gibt keine
-Anmeldung, Analyse-API, Telemetrie oder Cloud-Fallback. Zwischenablage und Downloads
-folgen den Einstellungen des verwendeten Browsers und Betriebssystems. Der optionale
-Prüfbericht ist eine datensparsame Zusammenfassung mit Hashwerten, Statistiken und
-Änderungsarten – vertrauliche Prüfberichte bitte nicht weitergeben.
+### Einzelne Offline-Datei – funktioniert sofort
+
+1. [`TextVerbessern-Browser.html`](https://github.com/svensteiner/rephraser/releases/download/portable-latest/TextVerbessern-Browser.html) herunterladen.
+2. Die Datei mit einem aktuellen Browser öffnen.
+3. Text einfügen, **Text verbessern** klicken und das Ergebnis kopieren.
+
+Die Datei enthält die Anwendung vollständig und braucht keinen Server, kein Konto und
+keine GitHub-Pages-Freischaltung. Die Anwendung selbst baut keine Netzwerkverbindung,
+verwendet kein Mistral-Modell und keinen Cloud-Fallback. Browser-Erweiterungen,
+Zwischenablage und Downloads folgen weiterhin den Einstellungen von Browser und
+Betriebssystem.
+
+### Browser-Adresse – nach einmaliger Pages-Freigabe
+
+Die statische [Browser-Ausgabe](https://svensteiner.github.io/rephraser/) kann nach der
+einmaligen Repository-Einstellung **Settings → Pages → Source: GitHub Actions** direkt
+im Browser geöffnet werden. GitHub Pages liefert dann nur die Programmdateien aus.
+
+Eingefügter Text, geöffnete Dateien und das Ergebnis werden von der Anwendung nicht
+übertragen. Es gibt keine Anmeldung, Analyse-API, Telemetrie oder Cloud-Fallback. Der
+optionale Prüfbericht ist eine datensparsame Zusammenfassung mit Hashwerten, Statistiken
+und Änderungsarten – vertrauliche Prüfberichte bitte nicht weitergeben.
 Die Browser-Ausgabe bietet sichere Unicode-/Copy-Paste-Bereinigung und wenige feste,
 prüfbare DE/EN-Formulierungsregeln. Sie enthält absichtlich kein Mistral-Modell und
 keine vollständige semantische Prüfung. Für gründliche lokale Modellbearbeitung bleibt
@@ -160,6 +174,12 @@ py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -e ".[dev,ui]"
 ```
+
+## Continuous quality checks
+
+GitHub Actions runs the full automated test and editorial-quality suite for every push and
+pull request, once daily at 04:17 UTC, and on demand. The scheduled run is read-only: it
+does not process user documents, publish a release, or change repository files.
 
 ## Run
 

@@ -46,7 +46,10 @@ class LocalMistralProvider(EditorialProvider):
 
         def request_worker() -> None:
             try:
-                opener = urllib.request.build_opener(NoRedirect)
+                # Explicitly discard environment and system proxy settings.  A
+                # configured proxy could otherwise receive the complete local
+                # model prompt before the request reaches the loopback runtime.
+                opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect)
                 with opener.open(request, timeout=self.timeout) as response:
                     active_response["value"] = response
                     # A connection can finish just after the caller has reached

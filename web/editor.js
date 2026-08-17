@@ -6,7 +6,7 @@
  * browser wrapper around a language model.
  */
 
-export const BROWSER_EDITION_VERSION = "1.0.0";
+export const BROWSER_EDITION_VERSION = "1.1.0";
 export const MAX_INPUT_CHARACTERS = 2_000_000;
 export const MAX_PROTECTED_TERMS = 50;
 export const MAX_PROTECTED_TERM_LENGTH = 100;
@@ -62,7 +62,7 @@ const UNUSUAL_WHITESPACE_CODE_POINTS = new Set([
 const PROTECTED_TERM_CHARACTER = /[\u0000-\u001F\u007F-\u009F\u00AD\u200B-\u200F\u202A-\u202E\u2060\u2066-\u2069\uFEFF]/u;
 const FORMAT_CHARACTER = /^\p{Cf}$/u;
 
-const PROTECTED_PROSE = /(^---\r?\n[\s\S]*?\r?\n---(?=\r?\n|$)|(?:```|~~~)[\s\S]*?(?:```|~~~)|^(?: {4}|\t).*$|^>.*$|``[^\n]*?``|`[^`\n]+`|<https?:\/\/[^>\n]+>|\]\([^\)\n]+\)|"[^"\n]+"|„[^“\n]+“|“[^”\n]+”|»[^«\n]+«|«[^»\n]+»|‘[^’\n]+’)/gm;
+const PROTECTED_PROSE = /(^---\r?\n[\s\S]*?\r?\n---(?=\r?\n|$)|(?:```|~~~)[\s\S]*?(?:```|~~~)|^(?: {4}|\t).*$|^>.*$|``[^\n]*?``|`[^`\n]+`|<!--[\s\S]*?-->|<[cC][oO][dD][eE]\b[^>]*>[\s\S]*?<\/[cC][oO][dD][eE]\s*>|<[pP][rR][eE]\b[^>]*>[\s\S]*?<\/[pP][rR][eE]\s*>|<https?:\/\/[^>\n]+>|\]\([^\)\n]+\)|"[^"\n]+"|„[^“\n]+“|“[^”\n]+”|»[^«\n]+«|«[^»\n]+»|‘[^’\n]+’)/gm;
 
 const FAST_REPLACEMENTS = [
   { label: "We would like to better understand", pattern: /\bWe would like to better understand\b/g, replacement: "We would appreciate clarification on" },
@@ -172,7 +172,7 @@ export function inspectText(text) {
       };
       existing.count += 1;
       if (existing.positions.length < MAX_REPORTED_POSITIONS) {
-        existing.positions.push(position);
+        existing.positions.push(position + 1);
       } else {
         existing.positions_truncated = true;
       }

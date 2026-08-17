@@ -1,4 +1,5 @@
 import json
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import threading
 import time
 
@@ -146,3 +147,61 @@ def test_preflight_uses_short_hard_local_readiness_check(monkeypatch) -> None:
 
     assert preflight_local_mistral() is True
     assert calls == [0.5]
+
+
+def test_readiness_never_sends_preflight_to_lowercase_http_proxy(monkeypatch) -> None:
+    """A hostile inherited proxy must not see even the model-tags preflight."""
+
+    class LocalRuntimeHandler(BaseHTTPRequestHandler):
+        received = threading.Event()
+
+        def do_GET(self):  # type: ignore[no-untyped-def]
+            type(self).received.set()
+            payload = b'{"models": [{"name": "mistral"}]}'
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def log_message(self, format, *args):  # type: ignore[no-untyped-def]
+            return None
+
+    class ProxyObserverHandler(BaseHTTPRequestHandler):
+        observations: list[tuple[str, str, bytes]] = []
+
+        def _record(self) -> None:
+            body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
+            type(self).observations.append((self.command, self.path, body))
+            self.send_response(502)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        do_GET = _record
+        do_POST = _record
+
+        def log_message(self, format, *args):  # type: ignore[no-untyped-def]
+            return None
+
+    runtime = ThreadingHTTPServer(("127.0.0.1", 0), LocalRuntimeHandler)
+    proxy = ThreadingHTTPServer(("127.0.0.1", 0), ProxyObserverHandler)
+    runtime_thread = threading.Thread(target=runtime.serve_forever, daemon=True)
+    proxy_thread = threading.Thread(target=proxy.serve_forever, daemon=True)
+    runtime_thread.start()
+    proxy_thread.start()
+    for variable in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "no_proxy"):
+        monkeypatch.delenv(variable, raising=False)
+    monkeypatch.setenv("http_proxy", f"http://127.0.0.1:{proxy.server_port}")
+    # Model a machine whose proxy bypass rules do not treat loopback specially.
+    monkeypatch.setattr("urllib.request.proxy_bypass", lambda host: False)
+    monkeypatch.setenv("MISTRAL_BASE_URL", f"http://127.0.0.1:{runtime.server_port}")
+    monkeypatch.setenv("MISTRAL_MODEL", "mistral")
+    try:
+        assert local_mistral_ready(timeout=1.0) is True
+        assert LocalRuntimeHandler.received.wait(0.5)
+        assert ProxyObserverHandler.observations == []
+    finally:
+        runtime.shutdown()
+        runtime.server_close()
+        proxy.shutdown()
+        proxy.server_close()

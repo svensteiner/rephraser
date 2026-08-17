@@ -269,6 +269,26 @@ def test_duplicated_proper_name_is_rejected_by_pipeline() -> None:
             "Revenue may decrease in the next quarter.",
             "changed_claim_polarity",
         ),
+        (
+            "The account cannot transfer the shares, but the company will sell the assets.",
+            "The account will transfer the shares, but the company cannot sell the assets.",
+            "altered_negation_scope",
+        ),
+        (
+            "Revenue may increase, but costs will decline.",
+            "Revenue will increase, but costs may decline.",
+            "altered_uncertainty_scope",
+        ),
+        (
+            "At least 10 reports are required.",
+            "At most 10 reports are required.",
+            "changed_claim_comparator",
+        ),
+        (
+            "Active.",
+            "Inactive.",
+            "changed_material_status",
+        ),
     ],
 )
 def test_high_risk_claim_inversions_are_rejected_by_pipeline(

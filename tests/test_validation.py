@@ -165,11 +165,132 @@ def test_detects_high_risk_polarity_and_modal_inversions(
     assert any(warning.kind == warning_kind and warning.value == marker for warning in warnings)
 
 
+def test_detects_cannot_moved_to_a_different_material_claim() -> None:
+    original = "The account cannot transfer the shares, but the company will sell the assets."
+    rewritten = "The account will transfer the shares, but the company cannot sell the assets."
+    warnings = validate_preservation(original, rewritten, extract_semantics(original))
+    assert any(warning.kind == "altered_negation_scope" for warning in warnings)
+
+
+def test_allows_cannot_spelling_normalization_without_a_modal_false_positive() -> None:
+    original = "The account cannot transfer the shares."
+    rewritten = "The account can not transfer the shares."
+    warnings = validate_preservation(original, rewritten, extract_semantics(original))
+    assert not any(
+        warning.kind in {"altered_negation", "altered_negation_scope", "changed_modal_obligation"}
+        for warning in warnings
+    )
+
+
+def test_detects_uncertainty_moved_to_a_different_material_claim() -> None:
+    original = "Revenue may increase, but costs will decline."
+    rewritten = "Revenue will increase, but costs may decline."
+    warnings = validate_preservation(original, rewritten, extract_semantics(original))
+    assert any(warning.kind == "altered_uncertainty_scope" for warning in warnings)
+
+
+def test_detects_at_least_to_at_most_comparator_inversion() -> None:
+    original = "At least 10 reports are required."
+    rewritten = "At most 10 reports are required."
+    warnings = validate_preservation(original, rewritten, extract_semantics(original))
+    assert any(
+        warning.kind == "changed_claim_comparator"
+        and warning.value == "threshold: at least -> at most"
+        for warning in warnings
+    )
+
+
+def test_detects_german_threshold_inversion() -> None:
+    original = "Mindestens 10 Berichte sind erforderlich."
+    rewritten = "Höchstens 10 Berichte sind erforderlich."
+    warnings = validate_preservation(original, rewritten, extract_semantics(original))
+    assert any(
+        warning.kind == "changed_claim_comparator"
+        and warning.value == "threshold: mindestens -> höchstens"
+        for warning in warnings
+    )
+
+
+def test_detects_short_material_status_reversal_and_deletion() -> None:
+    reversed_status = validate_preservation("Active.", "Inactive.", extract_semantics("Active."))
+    approval_reversal = validate_preservation("Approved.", "Rejected.", extract_semantics("Approved."))
+    deleted_status = validate_preservation(
+        "The account is active.", "The account was reviewed.", extract_semantics("The account is active.")
+    )
+    assert any(warning.kind == "changed_material_status" for warning in reversed_status)
+    assert any(warning.kind == "changed_material_status" for warning in approval_reversal)
+    assert any(
+        warning.kind in {"changed_material_status", "missing_material_status_claim"}
+        for warning in deleted_status
+    )
+
+
 def test_allows_aligned_high_risk_rewording_when_the_state_is_preserved() -> None:
     original = "Revenue may increase in the next quarter. The contract permits the transfer with consent."
     rewritten = "Revenue might rise in the next quarter. The contract allows the transfer with consent."
     warnings = validate_preservation(original, rewritten, extract_semantics(original))
     assert not any(warning.kind in {"changed_claim_polarity", "changed_modal_obligation"} for warning in warnings)
+
+
+@pytest.mark.parametrize(
+    ("original", "rewritten"),
+    [
+        ("Acme must pay Beta.", "Beta must pay Acme."),
+        ("Acme muss Beta zahlen.", "Beta muss Acme zahlen."),
+    ],
+)
+def test_detects_swapped_payer_and_recipient_roles(original: str, rewritten: str) -> None:
+    warnings = validate_preservation(original, rewritten, extract_semantics(original))
+    assert any(warning.kind == "swapped_payment_obligation_roles" for warning in warnings)
+
+
+def test_allows_an_equivalent_explicit_payment_obligation() -> None:
+    original = "Acme must pay Beta."
+    rewritten = "Acme is required to pay Beta."
+    warnings = validate_preservation(original, rewritten, extract_semantics(original))
+    assert not any(warning.kind == "swapped_payment_obligation_roles" for warning in warnings)
+
+
+def test_detects_numeric_markdown_table_cell_and_header_order_changes() -> None:
+    original = "| Entity | Q1 | Q2 |\n| --- | ---: | ---: |\n| Acme | 10 | 20 |"
+    swapped_values = "| Entity | Q1 | Q2 |\n| --- | ---: | ---: |\n| Acme | 20 | 10 |"
+    swapped_headers = "| Entity | Q2 | Q1 |\n| --- | ---: | ---: |\n| Acme | 10 | 20 |"
+
+    for rewritten in (swapped_values, swapped_headers):
+        warnings = validate_preservation(original, rewritten, extract_semantics(original))
+        assert any(warning.kind == "altered_table_numeric_layout" for warning in warnings)
+
+
+def test_detects_reporting_quarter_and_monetary_scale_changes() -> None:
+    original = "Revenue for Q1 was EUR 10 million."
+    changed_quarter = validate_preservation(
+        original,
+        "Revenue for Q2 was EUR 10 million.",
+        extract_semantics(original),
+    )
+    changed_scale = validate_preservation(
+        original,
+        "Revenue for Q1 was EUR 10 billion.",
+        extract_semantics(original),
+    )
+    preserved = validate_preservation(
+        original,
+        "Revenue for first quarter was EUR 10m.",
+        extract_semantics(original),
+    )
+    german_quarter = validate_preservation(
+        "Im 1. Quartal betrug der Umsatz EUR 10 Mio.",
+        "Im 2. Quartal betrug der Umsatz EUR 10 Mio.",
+        extract_semantics("Im 1. Quartal betrug der Umsatz EUR 10 Mio."),
+    )
+
+    assert any(warning.kind == "changed_reporting_period" for warning in changed_quarter)
+    assert any(warning.kind == "changed_monetary_scale" for warning in changed_scale)
+    assert any(warning.kind == "changed_reporting_period" for warning in german_quarter)
+    assert not any(
+        warning.kind in {"changed_reporting_period", "changed_monetary_scale"}
+        for warning in preserved
+    )
 
 
 def test_high_risk_guard_skips_claim_work_for_identical_content(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -196,3 +317,14 @@ def test_high_risk_guard_keeps_repeated_inversion_audit_bounded() -> None:
     warnings = validation._high_risk_claim_warnings(original, rewritten)
     assert len(warnings) == 1
     assert warnings[0].kind == "changed_claim_polarity"
+
+
+def test_high_risk_guard_fails_closed_when_its_risk_claim_budget_is_exceeded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(validation, "HIGH_RISK_MAX_RISK_CLAIMS", 2)
+    original = "The service is active. " * 3
+    rewritten = original.replace("The service", "The system", 1)
+    warnings = validation._high_risk_claim_warnings(original, rewritten)
+    assert len(warnings) == 1
+    assert warnings[0].kind == "high_risk_claim_scan_limit"

@@ -121,6 +121,17 @@ class DiffReport(BaseModel):
     added_sentences: list[str]
     removed_sentences: list[str]
     substantially_rewritten_sentences: list[dict[str, Any]]
+    # A complete SequenceMatcher comparison is deliberately bounded for large
+    # or highly repetitive inputs. These fields make that limit visible in the
+    # JSON audit instead of presenting an excerpt as a complete diff.
+    detail_truncated: bool = False
+    comparison_complete: bool = True
+    comparison_method: str = "full_sequence"
+    truncation_reason: str | None = None
+    original_word_count: int = 0
+    rewritten_word_count: int = 0
+    original_sentence_count: int = 0
+    rewritten_sentence_count: int = 0
 
 
 class Transformation(BaseModel):

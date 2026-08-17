@@ -256,3 +256,64 @@ def test_mistral_reports_oversized_input_before_any_network_call(monkeypatch) ->
     with pytest.raises(ProviderError) as captured_error:
         provider.rewrite(text, extract_semantics(text), TransformOptions())
     assert captured_error.value.code == "model_input_too_long"
+
+
+def test_mistral_never_sends_post_body_to_lowercase_http_proxy(monkeypatch) -> None:
+    """A lowercase inherited proxy must not receive document content in a prompt."""
+
+    class LocalRuntimeHandler(BaseHTTPRequestHandler):
+        request_bodies: list[bytes] = []
+
+        def do_POST(self):  # type: ignore[no-untyped-def]
+            body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
+            type(self).request_bodies.append(body)
+            payload = b'{"response": "Lokales Ergebnis."}'
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def log_message(self, format, *args):  # type: ignore[no-untyped-def]
+            return None
+
+    class ProxyObserverHandler(BaseHTTPRequestHandler):
+        request_bodies: list[bytes] = []
+
+        def _record(self) -> None:
+            body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
+            type(self).request_bodies.append(body)
+            self.send_response(502)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        do_GET = _record
+        do_POST = _record
+
+        def log_message(self, format, *args):  # type: ignore[no-untyped-def]
+            return None
+
+    runtime = ThreadingHTTPServer(("127.0.0.1", 0), LocalRuntimeHandler)
+    proxy = ThreadingHTTPServer(("127.0.0.1", 0), ProxyObserverHandler)
+    runtime_thread = threading.Thread(target=runtime.serve_forever, daemon=True)
+    proxy_thread = threading.Thread(target=proxy.serve_forever, daemon=True)
+    runtime_thread.start()
+    proxy_thread.start()
+    for variable in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "no_proxy"):
+        monkeypatch.delenv(variable, raising=False)
+    monkeypatch.setenv("http_proxy", f"http://127.0.0.1:{proxy.server_port}")
+    # Model a machine whose proxy bypass rules do not treat loopback specially.
+    monkeypatch.setattr("urllib.request.proxy_bypass", lambda host: False)
+    secret = "VERTRAULICH: keine Weitergabe an Dritte."
+    try:
+        provider = LocalMistralProvider(base_url=f"http://127.0.0.1:{runtime.server_port}")
+        result = provider.rewrite(secret, extract_semantics(secret), TransformOptions())
+        assert result == "Lokales Ergebnis."
+        assert len(LocalRuntimeHandler.request_bodies) == 1
+        assert secret.encode("utf-8") in LocalRuntimeHandler.request_bodies[0]
+        assert ProxyObserverHandler.request_bodies == []
+    finally:
+        runtime.shutdown()
+        runtime.server_close()
+        proxy.shutdown()
+        proxy.server_close()

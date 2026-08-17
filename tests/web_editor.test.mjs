@@ -61,6 +61,22 @@ test("fast browser rules improve only ordinary prose", () => {
   assert.ok(result.rewritten.endsWith("We would appreciate clarification on the report."));
 });
 
+test("fast browser rules preserve raw HTML code, preformatted blocks, and comments", () => {
+  const source = [
+    "<code>We would like to better understand the code.</code>",
+    "<pre>We would like to better understand the output.</pre>",
+    "<!-- We would like to better understand this note. -->",
+    "We would like to better understand the report.",
+  ].join("\n");
+  const result = transformText(source, { mode: MODE_FAST });
+
+  assert.equal(result.blocked, false);
+  assert.ok(result.rewritten.includes("<code>We would like to better understand the code.</code>"));
+  assert.ok(result.rewritten.includes("<pre>We would like to better understand the output.</pre>"));
+  assert.ok(result.rewritten.includes("<!-- We would like to better understand this note. -->"));
+  assert.ok(result.rewritten.endsWith("We would appreciate clarification on the report."));
+});
+
 test("protected terms remain exact and missing terms block browser processing", () => {
   const source = "We would like to better understand Project Aurora.";
   const protectedResult = transformText(source, {
@@ -95,7 +111,7 @@ test("inspection groups positions and contentless audit excludes text and protec
   const inspection = inspectText("A\u200BB\u200B\u2066");
   const zeroWidth = inspection.character_summary.find((item) => item.code_point === "U+200B");
   assert.equal(zeroWidth.count, 2);
-  assert.deepEqual(zeroWidth.positions, [1, 3]);
+  assert.deepEqual(zeroWidth.positions, [2, 4]);
 
   const result = transformText("We would like to better understand Project Aurora.", {
     mode: MODE_FAST,

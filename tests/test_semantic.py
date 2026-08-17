@@ -1,4 +1,10 @@
-from app.semantic import extract_semantics
+from app.semantic import (
+    extract_monetary_amounts,
+    extract_numeric_table_layouts,
+    extract_payment_obligations,
+    extract_reporting_periods,
+    extract_semantics,
+)
 
 
 def test_extracts_german_financial_crypto_constraints() -> None:
@@ -71,3 +77,17 @@ def test_explicit_protected_terms_are_added_only_when_present_exactly() -> None:
     )
     assert result.protected_terms == ["Project Aurora", "Kontenabstimmung"]
     assert all(term in result.must_preserve for term in result.protected_terms)
+
+
+def test_extracts_only_explicit_payment_period_scale_and_table_markers() -> None:
+    relation = extract_payment_obligations("Acme muss Beta zahlen.")
+    amounts = extract_monetary_amounts("Revenue for Q1 was EUR 10 million.")
+    table = extract_numeric_table_layouts(
+        "| Entity | Q1 | Q2 |\n| --- | ---: | ---: |\n| Acme | 10 | 20 |"
+    )
+
+    assert [(item.payer, item.payee) for item in relation] == [("acme", "beta")]
+    assert extract_reporting_periods("Revenue for first quarter was EUR 10m.") == ("Q1",)
+    assert [(item.currency, item.amount, item.scale) for item in amounts] == [("eur", "10", "million")]
+    assert table[0].headers == ("entity", "q1", "q2")
+    assert table[0].cells == (("acme", "q1", ("10",)), ("acme", "q2", ("20",)))

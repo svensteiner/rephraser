@@ -7,12 +7,16 @@ on:
       - "web/**"
       - "tests/test_browser_static.py"
       - "tests/web_editor.test.mjs"
+      - "tests/web_standalone.test.mjs"
+      - "scripts/build_browser_standalone.py"
       - ".github/workflows/pages.yml"
   pull_request:
     paths:
       - "web/**"
       - "tests/test_browser_static.py"
       - "tests/web_editor.test.mjs"
+      - "tests/web_standalone.test.mjs"
+      - "scripts/build_browser_standalone.py"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
@@ -32,9 +36,11 @@ jobs:
         with:
           node-version: "20"
       - name: Test browser editor rules
-        run: node --test tests/web_editor.test.mjs
+        run: node --test tests/web_editor.test.mjs tests/web_standalone.test.mjs
       - name: Test static privacy contract
         run: python tests/test_browser_static.py
+      - name: Verify generated offline browser edition
+        run: python scripts/build_browser_standalone.py --check
       - uses: actions/configure-pages@v5
       - name: Upload browser edition
         uses: actions/upload-pages-artifact@v4

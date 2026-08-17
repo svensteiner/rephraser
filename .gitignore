@@ -1,15 +1,29 @@
-.env
-.venv/
+# Python runtime and test artifacts
 __pycache__/
-.pytest_cache/
 *.py[cod]
-*.egg-info/
-*.audit.json
-*.diff.txt
-examples/*.edited.*
-outputs/
-user-data/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local environments, settings, and diagnostic output
+.venv/
+venv/
+.env
+.env.*
+!.env.example
 logs/
+*.log
+
+# Build artifacts (the tracked packaging specification remains under packaging/)
 build/
 dist/
-*.spec.bak
+portable/
+published-check/
+
+# Local editor and operating-system files
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store

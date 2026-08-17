@@ -1,8 +1,10 @@
 from app.desktop import (
+    CLIPBOARD_UNAVAILABLE_MESSAGE,
     KEYBOARD_SHORTCUTS,
     MODE_AUTOMATIC,
     MODE_SAFE,
     MODE_STRONG,
+    ProcessingRequest,
     STARTUP_ERROR_MESSAGE,
     STARTUP_ERROR_TITLE,
     available_modes,
@@ -139,6 +141,147 @@ def test_late_worker_results_are_rejected_after_fallback_or_close() -> None:
     assert request_is_current(4, 4, closed=True) is False
 
 
+def test_request_identity_requires_the_same_immutable_source_snapshot() -> None:
+    request = ProcessingRequest(4, "Ursprünglicher Text")
+
+    assert request_is_current(request, request, current_source="Ursprünglicher Text") is True
+    assert request_is_current(request, ProcessingRequest(4, "Neuer Text")) is False
+    assert request_is_current(request, request, current_source="Neuer Text") is False
+
+
+def test_clear_cancels_active_worker_and_rejects_its_late_result_or_error(monkeypatch) -> None:
+    from app.desktop import DesktopApp
+    from app.pipeline import run_pipeline
+
+    class Widget:
+        def __init__(self) -> None:
+            self.values: dict[str, object] = {}
+            self.stopped = False
+            self.hidden = False
+            self.focused = False
+
+        def configure(self, **values: object) -> None:
+            self.values.update(values)
+
+        def stop(self) -> None:
+            self.stopped = True
+
+        def pack_forget(self) -> None:
+            self.hidden = True
+
+        def focus_set(self) -> None:
+            self.focused = True
+
+    class TextBox(Widget):
+        def __init__(self, text: str) -> None:
+            super().__init__()
+            self.text = text
+
+        def get(self, _start: str, _end: str) -> str:
+            return self.text
+
+        def delete(self, _start: str, _end: str) -> None:
+            self.text = ""
+
+        def insert(self, _start: str, text: str) -> None:
+            self.text = text
+
+        def edit_modified(self, _value: bool) -> None:
+            return None
+
+    class Value:
+        def __init__(self) -> None:
+            self.value = ""
+
+        def set(self, value: str) -> None:
+            self.value = value
+
+    class MessageBox:
+        def __init__(self) -> None:
+            self.errors: list[tuple[str, str]] = []
+
+        def showerror(self, title: str, message: str) -> None:
+            self.errors.append((title, message))
+
+    class Root:
+        def __init__(self) -> None:
+            self.clipboard: list[str] = []
+
+        def clipboard_clear(self) -> None:
+            self.clipboard.clear()
+
+        def clipboard_append(self, text: str) -> None:
+            self.clipboard.append(text)
+
+        def update_idletasks(self) -> None:
+            return None
+
+    app = DesktopApp.__new__(DesktopApp)
+    request = ProcessingRequest(12, "Vertraulicher Ausgangstext")
+    app.active_request_id = request.request_id
+    app.active_request = request
+    app.closed = False
+    app.busy = True
+    app.processing_active = True
+    app.processing_started = 123.0
+    app.model_request_inflight_id = request.request_id
+    app.mistral_ready = True
+    app.input_text = TextBox(request.source)
+    app.output_text = TextBox("Altes Ergebnis")
+    app.run_button = Widget()
+    app.mode_box = Widget()
+    app.protected_terms_button = Widget()
+    app.progress = Widget()
+    app.copy_button = Widget()
+    app.changes_button = Widget()
+    app.edit_result_button = Widget()
+    app.discard_edit_button = Widget()
+    app.result_status = Widget()
+    app.result_line = Widget()
+    app.bottom = Widget()
+    app.source_count = Value()
+    app.result_visible = True
+    app.output_editing = False
+    app.processed_source = request.source
+    app.generated_result = "Altes Ergebnis"
+    app.last_audit = object()
+    app.manual_result_verified = True
+    app.verified_result_before_edit = "Altes Ergebnis"
+    app.protected_terms = ("Ausgangstext",)
+    app.messagebox = MessageBox()
+    app.root = Root()
+    app._refresh_mistral_controls = lambda: None
+    app._update_protected_terms_button = lambda: None
+    diagnostic_events: list[str] = []
+    monkeypatch.setattr(
+        "app.desktop.write_diagnostic_event", lambda event, _error: diagnostic_events.append(event)
+    )
+
+    app.clear_all()
+
+    assert app.active_request is None
+    assert app.active_request_id == 13
+    assert app.busy is False
+    assert app.processing_active is False
+    assert app.progress.stopped is True
+    assert app.input_text.text == ""
+    assert app.output_text.text == ""
+    assert app.copy_button.values["state"] == "disabled"
+    # Keep this marker until the abandoned Mistral worker has actually ended.
+    assert app.model_request_inflight_id == request.request_id
+
+    app._show_result(run_pipeline(request.source), "rules", request)
+    app._show_error(RuntimeError("später Workerfehler"), request)
+    app.copy_result()
+
+    assert app.output_text.text == ""
+    assert app.generated_result == ""
+    assert app.manual_result_verified is False
+    assert app.messagebox.errors == []
+    assert diagnostic_events == []
+    assert app.root.clipboard == []
+
+
 def test_safe_result_action_invalidates_slow_model_and_starts_rules_cleanup(monkeypatch) -> None:
     from app.desktop import DesktopApp
 
@@ -181,7 +324,7 @@ def test_safe_result_action_invalidates_slow_model_and_starts_rules_cleanup(monk
         "Ein unveränderter Text.",
         "rules",
         "light",
-        8,
+        ProcessingRequest(8, "Ein unveränderter Text."),
         (),
         "user_selected_safe_fallback",
     )]
@@ -256,7 +399,14 @@ def test_thorough_mode_preflight_immediately_uses_rules_when_mistral_stopped(mon
 
     app.start_processing()
 
-    assert started_with == [("Ein klarer Text.", "rules", "light", 1, (), "provider_unavailable")]
+    assert started_with == [(
+        "Ein klarer Text.",
+        "rules",
+        "light",
+        ProcessingRequest(1, "Ein klarer Text."),
+        (),
+        "provider_unavailable",
+    )]
     assert app.mistral_ready is False
     assert app.mode.get() == MODE_AUTOMATIC
     assert app.mode_box.values["values"] == available_modes(False)
@@ -329,7 +479,14 @@ def test_thorough_mode_preflight_keeps_model_path_when_local_model_is_ready(monk
 
     app.start_processing()
 
-    assert started_with == [("Ein klarer Text.", "rules+mistral-local", "substantial", 1, (), None)]
+    assert started_with == [(
+        "Ein klarer Text.",
+        "rules+mistral-local",
+        "substantial",
+        ProcessingRequest(1, "Ein klarer Text."),
+        (),
+        None,
+    )]
     assert app.model_request_inflight_id == 1
     assert app.run_button.values["text"] == "Sichere Fassung jetzt"
     assert app.run_button.values["focused"] is True
@@ -644,6 +801,39 @@ def test_ui_queue_is_drained_on_main_thread() -> None:
     assert scheduled[0][0] == 50
 
 
+def test_ui_queue_continues_after_callback_failure_and_reschedules_privately(monkeypatch) -> None:
+    import queue
+    from app.desktop import DesktopApp
+
+    scheduled = []
+    received = []
+    diagnostics = []
+
+    class Root:
+        def after(self, delay, callback):
+            scheduled.append((delay, callback))
+
+    def failing_callback(*_args):
+        raise RuntimeError("VERTRAULICHER EINGABETEXT")
+
+    def record_diagnostic(event, error):
+        diagnostics.append((event, type(error).__name__))
+
+    monkeypatch.setattr("app.desktop.write_diagnostic_event", record_diagnostic)
+    app = DesktopApp.__new__(DesktopApp)
+    app.closed = False
+    app.root = Root()
+    app.ui_events = queue.Queue()
+    app.ui_events.put((failing_callback, ("ignored",)))
+    app.ui_events.put((lambda *args: received.append(args), ("weiter", 10)))
+
+    app._drain_ui_events()
+
+    assert received == [("weiter", 10)]
+    assert diagnostics == [("ui_callback_failed", "RuntimeError")]
+    assert scheduled and scheduled[0][0] == 50
+
+
 def test_copy_support_info_uses_metadata_report_only() -> None:
     from app.desktop import DesktopApp
 
@@ -674,6 +864,114 @@ def test_copy_support_info_uses_metadata_report_only() -> None:
 
     assert clipboard == ["Version 1.7.1\nkein Eingabetext"]
     assert button.values["text"] == "Kopiert ✓"
+
+
+def test_copy_support_info_reports_clipboard_failure_without_exposing_diagnostics(monkeypatch) -> None:
+    from app.desktop import DesktopApp
+
+    diagnostics = []
+    messages = []
+
+    class Root:
+        def clipboard_clear(self):
+            return None
+
+        def clipboard_append(self, _value):
+            raise RuntimeError("Clipboard has confidential data")
+
+        def update_idletasks(self):
+            raise AssertionError("clipboard append must stop the copy operation")
+
+    class Button:
+        def __init__(self):
+            self.values = {}
+
+        def configure(self, **values):
+            self.values.update(values)
+
+    class MessageBox:
+        def showwarning(self, title, message):
+            messages.append((title, message))
+
+    def record_diagnostic(event, error):
+        diagnostics.append((event, type(error).__name__))
+
+    monkeypatch.setattr("app.desktop.write_diagnostic_event", record_diagnostic)
+    app = DesktopApp.__new__(DesktopApp)
+    app.root = Root()
+    app.messagebox = MessageBox()
+    app.support_text = lambda: "Version 1.7.1\\nkein Eingabetext"
+    button = Button()
+
+    app._copy_support_info(button)
+
+    assert diagnostics == [("clipboard_copy_failed", "RuntimeError")]
+    assert button.values["text"] == "Kopieren nicht möglich"
+    assert messages == [("Kopieren nicht möglich", CLIPBOARD_UNAVAILABLE_MESSAGE)]
+    assert "confidential" not in messages[0][1]
+
+
+def test_copy_result_reports_clipboard_failure_without_exposing_text(monkeypatch) -> None:
+    from app.desktop import DesktopApp
+
+    diagnostics = []
+    messages = []
+
+    class Text:
+        def __init__(self, value):
+            self.value = value
+
+        def get(self, _start, _end):
+            return self.value
+
+    class Root:
+        def clipboard_clear(self):
+            raise RuntimeError("VERTRAULICHER AUSGABETEXT")
+
+        def clipboard_append(self, _value):
+            raise AssertionError("clipboard append must not run after clear failed")
+
+        def update_idletasks(self):
+            raise AssertionError("clipboard update must not run after clear failed")
+
+        def after(self, *_args):
+            raise AssertionError("a failed copy must not schedule a success reset")
+
+    class Widget:
+        def __init__(self):
+            self.values = {}
+
+        def configure(self, **values):
+            self.values.update(values)
+
+    class MessageBox:
+        def showwarning(self, title, message):
+            messages.append((title, message))
+
+    def record_diagnostic(event, error):
+        diagnostics.append((event, type(error).__name__))
+
+    source = "Ausgangstext"
+    result = "Vertrauliches Ergebnis"
+    monkeypatch.setattr("app.desktop.write_diagnostic_event", record_diagnostic)
+    app = DesktopApp.__new__(DesktopApp)
+    app.input_text = Text(source)
+    app.output_text = Text(result)
+    app.processed_source = source
+    app.busy = False
+    app.manual_result_verified = True
+    app.root = Root()
+    app.result_status = Widget()
+    app.copy_button = Widget()
+    app.messagebox = MessageBox()
+
+    app.copy_result()
+
+    assert diagnostics == [("clipboard_copy_failed", "RuntimeError")]
+    assert app.result_status.values["text"] == CLIPBOARD_UNAVAILABLE_MESSAGE
+    assert app.copy_button.values["text"] == "Kopieren nicht möglich"
+    assert messages == [("Kopieren nicht möglich", CLIPBOARD_UNAVAILABLE_MESSAGE)]
+    assert result not in messages[0][1]
 
 
 def test_release_page_opens_only_when_user_invokes_action(monkeypatch) -> None:

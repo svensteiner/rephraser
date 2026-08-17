@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import json
 from pathlib import Path
 import queue
@@ -38,6 +39,10 @@ RELEASE_PAGE_URL = "https://github.com/svensteiner/rephraser/releases/tag/portab
 MAX_CHARACTERS = 2_000_000
 CHANGE_PREVIEW_MAX_CHARACTERS = 200_000
 INDIVIDUAL_CHANGE_MAX_GROUPS = 100
+CLIPBOARD_UNAVAILABLE_MESSAGE = (
+    "Kopieren ist derzeit nicht möglich, weil die Zwischenablage nicht verfügbar ist. "
+    "Bitte versuchen Sie es erneut."
+)
 STARTUP_ERROR_TITLE = "Text verbessern – Startproblem"
 STARTUP_ERROR_MESSAGE = (
     "Text verbessern konnte nicht gestartet werden.\n\n"
@@ -110,9 +115,36 @@ def result_is_current(source: str, processed_source: str | None, result: str, bu
     return result_actions_allowed(state)
 
 
-def request_is_current(request_id: int, active_request_id: int, closed: bool = False) -> bool:
-    """Reject late worker results after fallback, restart, or window close."""
-    return not closed and request_id == active_request_id
+@dataclass(frozen=True, slots=True)
+class ProcessingRequest:
+    """Immutable identity for one background transformation request.
+
+    The source snapshot is deliberately part of the identity.  A numeric counter
+    alone is easy to invalidate, but carrying the immutable source guards against
+    any late callback being applied to a different input text.
+    """
+
+    request_id: int
+    source: str
+
+
+def request_is_current(
+    request: ProcessingRequest | int,
+    active_request: ProcessingRequest | int | None,
+    closed: bool = False,
+    current_source: str | None = None,
+) -> bool:
+    """Reject late worker results after cancellation, fallback, restart, or close."""
+    if closed or request != active_request:
+        return False
+    if isinstance(request, ProcessingRequest) and current_source is not None:
+        return request.source == current_source
+    return True
+
+
+def request_number(request: ProcessingRequest | int) -> int:
+    """Return the counter used to track a still-finishing model worker."""
+    return request.request_id if isinstance(request, ProcessingRequest) else request
 
 
 def run_self_test() -> dict[str, object]:
@@ -170,6 +202,7 @@ class DesktopApp:
         self.processing_active = False
         self.processing_started = 0.0
         self.active_request_id = 0
+        self.active_request: ProcessingRequest | None = None
         self.model_request_inflight_id: int | None = None
         self.closed = False
         self.ui_events: queue.Queue[tuple[object, tuple[object, ...]]] = queue.Queue()
@@ -574,6 +607,46 @@ class DesktopApp:
         self.model_request_inflight_id = None
         self._set_mistral_availability(self.mistral_ready)
 
+    def _start_request(self, source: str) -> ProcessingRequest:
+        """Create the immutable identity that owns the next worker callback."""
+        self.active_request_id += 1
+        request = ProcessingRequest(self.active_request_id, source)
+        self.active_request = request
+        return request
+
+    def _invalidate_active_request(self) -> None:
+        """Make any queued completion from the current worker permanently stale."""
+        self.active_request_id += 1
+        self.active_request = None
+
+    def _active_request_identity(self) -> ProcessingRequest | int | None:
+        """Use an integer fallback only for lightweight legacy test doubles."""
+        if hasattr(self, "active_request"):
+            return self.active_request
+        return getattr(self, "active_request_id", None)
+
+    def _request_is_current(self, request: ProcessingRequest | int) -> bool:
+        """Check the request token and its exact source snapshot on the UI thread."""
+        source = self.input_text.get("1.0", "end-1c")
+        return request_is_current(
+            request,
+            self._active_request_identity(),
+            getattr(self, "closed", False),
+            source,
+        )
+
+    def _restore_idle_controls(self) -> None:
+        """Return the main controls to a usable state without reviving a worker."""
+        self.busy = False
+        self.processing_active = False
+        self.processing_started = 0.0
+        self.progress.stop()
+        self.run_button.configure(state="normal", text=primary_action_label(self.mistral_ready))
+        self.input_text.configure(state="normal")
+        self.mode_box.configure(state="readonly")
+        self.protected_terms_button.configure(state="normal")
+        self._refresh_mistral_controls()
+
     def _handle_escape(self) -> None:
         """Provide a keyboard-safe exit from the two deliberate editing states."""
         if self.busy and self.processing_active:
@@ -645,11 +718,10 @@ class DesktopApp:
         )
         self.progress.start(12)
         self.processing_active = "mistral" in provider
-        self.active_request_id += 1
-        request_id = self.active_request_id
+        request = self._start_request(source)
         if self.processing_active:
             self.processing_started = time.monotonic()
-            self.model_request_inflight_id = request_id
+            self.model_request_inflight_id = request.request_id
             self.run_button.configure(state="normal", text="Sichere Fassung jetzt")
             self.run_button.focus_set()
             self._update_elapsed_time()
@@ -661,23 +733,22 @@ class DesktopApp:
             self.result_status.configure(text="Text wird sofort lokal verbessert …")
         thread = threading.Thread(
             target=self._worker,
-            args=(source, provider, strength, request_id, self.protected_terms, fallback_kind),
+            args=(source, provider, strength, request, self.protected_terms, fallback_kind),
             daemon=True,
         )
         try:
             thread.start()
         except RuntimeError as error:
-            if getattr(self, "model_request_inflight_id", None) == request_id:
+            if getattr(self, "model_request_inflight_id", None) == request.request_id:
                 self.model_request_inflight_id = None
-            self._show_error(error, request_id)
+            self._show_error(error, request)
 
     def use_safe_result_now(self, *, automatically: bool = False) -> None:
         """Ignore a slow model result and immediately produce deterministic local cleanup."""
         if not self.busy or not self.processing_active:
             return
         source = self.input_text.get("1.0", "end-1c")
-        self.active_request_id += 1
-        request_id = self.active_request_id
+        request = self._start_request(source)
         self.processing_active = False
         self._set_mistral_availability(self.mistral_ready)
         self.run_button.configure(state="disabled", text=primary_action_label(self.mistral_ready))
@@ -691,7 +762,7 @@ class DesktopApp:
                 source,
                 "rules",
                 "light",
-                request_id,
+                request,
                 self.protected_terms,
                 "provider_timeout" if automatically else "user_selected_safe_fallback",
             ),
@@ -701,7 +772,7 @@ class DesktopApp:
         try:
             thread.start()
         except RuntimeError as error:
-            self._show_error(error, request_id)
+            self._show_error(error, request)
 
     def _update_elapsed_time(self) -> None:
         if not self.processing_active:
@@ -721,7 +792,7 @@ class DesktopApp:
         source: str,
         provider: str,
         strength: str,
-        request_id: int,
+        request: ProcessingRequest | int,
         protected_terms: tuple[str, ...] = (),
         fallback_kind: str | None = None,
     ) -> None:
@@ -769,12 +840,12 @@ class DesktopApp:
                         message="Die sichere lokale Grundbereinigung wurde manuell gewählt.",
                     ))
         except Exception as error:  # UI boundary: always return control to the user.
-            self._schedule_ui(self._show_error, error, request_id)
+            self._schedule_ui(self._show_error, error, request)
         else:
-            self._schedule_ui(self._show_result, result, provider, request_id)
+            self._schedule_ui(self._show_result, result, provider, request)
         finally:
             if model_request:
-                self._schedule_ui(self._model_request_finished, request_id)
+                self._schedule_ui(self._model_request_finished, request_number(request))
 
     def _schedule_ui(self, callback: object, *args: object) -> None:
         """Deliver worker results only while the Tk window still exists."""
@@ -783,33 +854,42 @@ class DesktopApp:
         self.ui_events.put((callback, args))
 
     def _drain_ui_events(self) -> None:
-        """Run queued worker completions exclusively on Tk's main thread."""
+        """Run queued worker completions exclusively on Tk's main thread.
+
+        A failed UI callback must not stop the polling loop: a later worker result
+        can still restore the controls or release a finished Mistral request.
+        Diagnostics deliberately retain only the exception type, never callback
+        arguments or document text.
+        """
         if self.closed:
             return
-        while True:
-            try:
-                callback, args = self.ui_events.get_nowait()
-            except queue.Empty:
-                break
-            callback(*args)  # type: ignore[operator]
-        self.root.after(50, self._drain_ui_events)
+        try:
+            while True:
+                try:
+                    callback, args = self.ui_events.get_nowait()
+                except queue.Empty:
+                    break
+                try:
+                    callback(*args)  # type: ignore[operator]
+                except Exception as error:  # Keep a single failed callback from stranding the UI.
+                    try:
+                        write_diagnostic_event("ui_callback_failed", error)
+                    except Exception:
+                        # Diagnostics are deliberately best-effort and must not affect the UI queue.
+                        pass
+        finally:
+            if not self.closed:
+                self.root.after(50, self._drain_ui_events)
 
-    def _show_result(self, result: object, provider: str, request_id: int) -> None:
-        if not request_is_current(request_id, self.active_request_id, self.closed):
+    def _show_result(self, result: object, provider: str, request: ProcessingRequest | int) -> None:
+        if not self._request_is_current(request):
             return
         warning_kinds = {warning.kind for warning in result.audit.fact_preservation_warnings}
         # Ollama can stop between the short readiness GET and the actual model
         # request. Do not advertise a thorough mode that just proved unavailable.
         if "provider_unavailable" in warning_kinds:
             self._set_mistral_availability(False)
-        self.busy = False
-        self.processing_active = False
-        self.progress.stop()
-        self.run_button.configure(state="normal", text=primary_action_label(self.mistral_ready))
-        self.input_text.configure(state="normal")
-        self.mode_box.configure(state="readonly")
-        self.protected_terms_button.configure(state="normal")
-        self._refresh_mistral_controls()
+        self._restore_idle_controls()
         rewritten = result.rewritten_text
         source = self.input_text.get("1.0", "end-1c")
         changed = rewritten != source
@@ -943,17 +1023,10 @@ class DesktopApp:
         self.result_status.configure(text="Manuelle Änderungen verworfen – letzte geprüfte Fassung wiederhergestellt.")
         self.copy_button.focus_set()
 
-    def _show_error(self, error: Exception, request_id: int) -> None:
-        if not request_is_current(request_id, self.active_request_id, self.closed):
+    def _show_error(self, error: Exception, request: ProcessingRequest | int) -> None:
+        if not self._request_is_current(request):
             return
-        self.busy = False
-        self.processing_active = False
-        self.progress.stop()
-        self.run_button.configure(state="normal", text=primary_action_label(self.mistral_ready))
-        self.input_text.configure(state="normal")
-        self.mode_box.configure(state="readonly")
-        self.protected_terms_button.configure(state="normal")
-        self._refresh_mistral_controls()
+        self._restore_idle_controls()
         source = self.input_text.get("1.0", "end-1c")
         previous = self.output_text.get("1.0", "end-1c")
         previous_available = result_is_current(source, self.processed_source, previous, False)
@@ -972,7 +1045,7 @@ class DesktopApp:
     def _close(self) -> None:
         """Invalidate pending callbacks before closing the native window."""
         self.closed = True
-        self.active_request_id += 1
+        self._invalidate_active_request()
         self.processing_active = False
         self.root.destroy()
 
@@ -1080,10 +1153,45 @@ class DesktopApp:
             )
 
     def _copy_support_info(self, button: object) -> None:
-        self.root.clipboard_clear()
-        self.root.clipboard_append(self.support_text())
-        self.root.update_idletasks()
+        support_info = self.support_text()
+        try:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(support_info)
+            self.root.update_idletasks()
+        except Exception as error:
+            self._show_clipboard_failure(error, button=button)
+            return
         button.configure(text="Kopiert ✓")
+
+    def _show_clipboard_failure(
+        self,
+        error: Exception,
+        *,
+        button: object | None = None,
+        update_result_status: bool = False,
+    ) -> None:
+        """Report clipboard failures without exposing text or exception details."""
+        try:
+            write_diagnostic_event("clipboard_copy_failed", error)
+        except Exception:
+            # Even a full or unavailable diagnostics folder must not cause a Tk traceback.
+            pass
+        if update_result_status:
+            try:
+                self.result_status.configure(text=CLIPBOARD_UNAVAILABLE_MESSAGE)
+            except Exception:
+                pass
+        if button is not None:
+            try:
+                button.configure(text="Kopieren nicht möglich")  # type: ignore[union-attr]
+            except Exception:
+                pass
+        messagebox = getattr(self, "messagebox", None)
+        if messagebox is not None:
+            try:
+                messagebox.showwarning("Kopieren nicht möglich", CLIPBOARD_UNAVAILABLE_MESSAGE)
+            except Exception:
+                pass
 
     def open_change_preview(self) -> None:
         """Show a plain-language, side-by-side review without cluttering the main workflow."""
@@ -1335,9 +1443,13 @@ class DesktopApp:
             source, self.processed_source, result, self.busy
         ):
             return
-        self.root.clipboard_clear()
-        self.root.clipboard_append(result)
-        self.root.update_idletasks()
+        try:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(result)
+            self.root.update_idletasks()
+        except Exception as error:
+            self._show_clipboard_failure(error, button=self.copy_button, update_result_status=True)
+            return
         self.result_status.configure(text="Kopiert ✓")
         self.copy_button.configure(text="Kopiert ✓")
         self.root.after(1600, lambda: self.copy_button.configure(text="Ergebnis kopieren"))
@@ -1368,6 +1480,11 @@ class DesktopApp:
         self.result_status.configure(text="Gespeichert ✓")
 
     def clear_all(self) -> None:
+        # Python threads cannot safely be killed.  Instead, invalidate their
+        # immutable callback token before restoring the controls.  A late result
+        # or error will then be ignored even if the worker finishes afterwards.
+        self._invalidate_active_request()
+        self._restore_idle_controls()
         self.input_text.delete("1.0", "end")
         self._replace_output("")
         self.copy_button.configure(state="disabled")

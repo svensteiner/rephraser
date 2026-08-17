@@ -12,6 +12,17 @@ Sollen interne Bezeichnungen unverändert bleiben, öffne vor der Bearbeitung
 
 Python, Administratorrechte und eine Installation sind dafür nicht erforderlich.
 
+## Einzelne Browser-Datei (ohne Entpacken)
+
+1. Lade **TextVerbessern-Browser.html** von der aktuellen GitHub-Release-Seite herunter.
+2. Öffne die Datei mit einem aktuellen Browser.
+3. Füge den Text ein, klicke auf **Text verbessern** und danach auf **Ergebnis kopieren**.
+
+Diese Ausgabe arbeitet vollständig in der geöffneten Datei und benötigt weder Python
+noch einen Server. Sie verwendet keine Cloud-API und kein Mistral-Modell. Das Ergebnis
+ist eine schnelle, regelbasierte Bereinigung; wichtige Texte bitte vor dem Versenden
+selbst lesen.
+
 ## Start aus dem Quellcode
 
 1. Doppelklicke auf **TEXT VERBESSERN.cmd**.
