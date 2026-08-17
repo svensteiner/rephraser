@@ -37,6 +37,11 @@ MODE_STRONG = "Gründlich mit Mistral (bis 45 s)"
 MODEL_UI_DEADLINE_SECONDS = 45.0
 RELEASE_PAGE_URL = "https://github.com/svensteiner/rephraser/releases/tag/portable-latest"
 MAX_CHARACTERS = 2_000_000
+# UTF-8 needs at most four bytes per code point, plus an optional BOM.  Check
+# this before opening a selected file so a mistaken multi-gigabyte document is
+# never read into the desktop process merely to discover that it is too large.
+MAX_OPEN_FILE_BYTES = MAX_CHARACTERS * 4 + 3
+SUPPORTED_OPEN_FILE_SUFFIXES = frozenset({".txt", ".md"})
 CHANGE_PREVIEW_MAX_CHARACTERS = 200_000
 INDIVIDUAL_CHANGE_MAX_GROUPS = 100
 CLIPBOARD_UNAVAILABLE_MESSAGE = (
@@ -126,6 +131,78 @@ class ProcessingRequest:
 
     request_id: int
     source: str
+
+
+class OpenTextFileError(ValueError):
+    """A local, user-safe reason why a selected source file cannot be opened."""
+
+    def __init__(self, title: str, message: str) -> None:
+        super().__init__(message)
+        self.title = title
+
+
+def preflight_open_text_file(path: str | Path) -> Path:
+    """Validate a selected .txt/.md file before any content is read.
+
+    The dialog filter is only a convenience; users can still type a path by
+    hand, so the suffix and size checks must be enforced here as well.
+    """
+    candidate = Path(path)
+    if candidate.suffix.casefold() not in SUPPORTED_OPEN_FILE_SUFFIXES:
+        raise OpenTextFileError(
+            "Dateityp nicht unterstützt",
+            "Bitte wählen Sie eine Textdatei (.txt) oder Markdown-Datei (.md).",
+        )
+    try:
+        metadata = candidate.stat()
+        is_regular_file = candidate.is_file()
+    except OSError as error:
+        raise OpenTextFileError(
+            "Datei nicht lesbar",
+            "Die Datei kann lokal nicht gelesen werden. Bitte wählen Sie eine lesbare .txt- oder .md-Datei.",
+        ) from error
+    if not is_regular_file:
+        raise OpenTextFileError(
+            "Datei nicht lesbar",
+            "Bitte wählen Sie eine einzelne lesbare .txt- oder .md-Datei aus.",
+        )
+    if metadata.st_size > MAX_OPEN_FILE_BYTES:
+        maximum_megabytes = MAX_OPEN_FILE_BYTES / 1_000_000
+        raise OpenTextFileError(
+            "Datei zu groß",
+            f"Die Datei ist größer als {maximum_megabytes:.1f} MB und wird nicht geöffnet. "
+            "Bitte verwenden Sie eine kleinere .txt- oder .md-Datei.",
+        )
+    return candidate
+
+
+def read_preflighted_text_file(path: Path) -> str:
+    """Read a preflighted UTF-8 text file with a second character-size guard."""
+    try:
+        with path.open("r", encoding="utf-8-sig", newline=None) as source_file:
+            content = source_file.read(MAX_CHARACTERS + 1)
+    except (OSError, UnicodeError) as error:
+        raise OpenTextFileError(
+            "Datei nicht lesbar",
+            "Die Datei konnte nicht lokal als UTF-8-Text gelesen werden. "
+            "Bitte wählen Sie eine lesbare UTF-8-codierte .txt- oder .md-Datei.",
+        ) from error
+    if len(content) > MAX_CHARACTERS:
+        raise OpenTextFileError(
+            "Datei zu groß",
+            f"Die Datei enthält mehr als {MAX_CHARACTERS:,} Zeichen und wird nicht geöffnet.".replace(",", "."),
+        )
+    return content
+
+
+def clear_confirmation_required(
+    source: str,
+    result: str,
+    protected_terms: tuple[str, ...],
+    generated_result: str = "",
+) -> bool:
+    """Only ask before destroying actual local content, never for a blank form."""
+    return bool(source or result or protected_terms or generated_result)
 
 
 def request_is_current(
@@ -655,13 +732,16 @@ class DesktopApp:
             self.discard_manual_edits()
 
     def open_file(self) -> None:
-        path = self.filedialog.askopenfilename(filetypes=(("Text und Markdown", "*.txt *.md"), ("Alle Dateien", "*.*")))
+        path = self.filedialog.askopenfilename(
+            filetypes=(("Textdatei", "*.txt"), ("Markdown-Datei", "*.md")),
+        )
         if not path:
             return
         try:
-            content = Path(path).read_text(encoding="utf-8-sig")
-        except (OSError, UnicodeError) as error:
-            self.messagebox.showerror("Datei nicht lesbar", f"Die Datei konnte nicht geöffnet werden.\n\n{error}")
+            candidate = preflight_open_text_file(path)
+            content = read_preflighted_text_file(candidate)
+        except OpenTextFileError as error:
+            self.messagebox.showerror(error.title, str(error))
             return
         self._set_source_text(content)
 
@@ -1480,6 +1560,27 @@ class DesktopApp:
         self.result_status.configure(text="Gespeichert ✓")
 
     def clear_all(self) -> None:
+        source = self.input_text.get("1.0", "end-1c")
+        result = self.output_text.get("1.0", "end-1c")
+        if clear_confirmation_required(
+            source,
+            result,
+            self.protected_terms,
+            getattr(self, "generated_result", ""),
+        ):
+            confirmed = self.messagebox.askyesno(
+                "Text wirklich leeren?",
+                "Alle aktuellen Eingaben, Ergebnisse und geschützten Begriffe werden lokal aus der Anwendung entfernt. "
+                "Dieser Vorgang kann nicht rückgängig gemacht werden.",
+                default="no",
+                parent=self.root,
+            )
+            if not confirmed:
+                return
+        self._clear_all_confirmed()
+
+    def _clear_all_confirmed(self) -> None:
+        """Clear state only after confirmation, or when the form was already empty."""
         # Python threads cannot safely be killed.  Instead, invalidate their
         # immutable callback token before restoring the controls.  A late result
         # or error will then be ignored even if the worker finishes afterwards.

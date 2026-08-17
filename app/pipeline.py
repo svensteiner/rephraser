@@ -22,7 +22,7 @@ from .rewrite import rewrite_text
 from .semantic import extract_semantics
 from .validation import validate_preservation
 
-PIPELINE_VERSION = "1.15.0"
+PIPELINE_VERSION = "1.16.0"
 
 
 # A character-level SequenceMatcher gives useful, exact offsets for ordinary

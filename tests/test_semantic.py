@@ -2,6 +2,7 @@ from app.semantic import (
     extract_monetary_amounts,
     extract_numeric_table_layouts,
     extract_payment_obligations,
+    extract_quantified_values,
     extract_reporting_periods,
     extract_semantics,
 )
@@ -91,3 +92,20 @@ def test_extracts_only_explicit_payment_period_scale_and_table_markers() -> None
     assert [(item.currency, item.amount, item.scale) for item in amounts] == [("eur", "10", "million")]
     assert table[0].headers == ("entity", "q1", "q2")
     assert table[0].cells == (("acme", "q1", ("10",)), ("acme", "q2", ("20",)))
+
+
+def test_extracts_written_money_and_narrow_business_quantity_units() -> None:
+    written_money = extract_monetary_amounts("Revenue was 10 million euros in Q1.")
+    quantities = extract_quantified_values(
+        "The rate rose by 10 basis points; payment is due within 30 days; "
+        "the company issued 10 million shares."
+    )
+
+    assert [(item.currency, item.amount, item.scale) for item in written_money] == [
+        ("eur", "10", "million")
+    ]
+    assert [(item.amount, item.scale, item.unit) for item in quantities] == [
+        ("10", "", "basis_points"),
+        ("30", "", "days"),
+        ("10", "million", "shares"),
+    ]

@@ -200,6 +200,12 @@ h3 { margin: 0 0 .6rem; font-size: 1rem; }
   text-transform: uppercase;
 }
 
+.mode-help {
+  margin: .8rem 0 0;
+  color: var(--muted);
+  font-size: .88rem;
+}
+
 .protect-details, .review-details {
   margin-top: 1.25rem;
   padding: .9rem 1rem;
@@ -226,6 +232,22 @@ summary span { margin-left: .35rem; color: var(--muted); font-size: .82rem; font
 .panel-label { display: flex; justify-content: space-between; gap: .7rem; margin-bottom: .45rem; font-size: .85rem; font-weight: 800; }
 .panel-label span:last-child { color: var(--muted); font-weight: 500; }
 .finished-panel .panel-label span:first-child { color: var(--mint-ink); }
+
+.review-confirmation {
+  display: flex;
+  gap: .65rem;
+  align-items: flex-start;
+  margin: 0 0 1rem;
+  padding: .8rem .9rem;
+  color: var(--blue-dark);
+  background: var(--blue-soft);
+  border: 1px solid #9bb4c1;
+  border-radius: .65rem;
+  font-size: .9rem;
+  font-weight: 700;
+}
+
+.review-confirmation input { margin-top: .2rem; flex: 0 0 auto; }
 
 .review-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 1.5rem; padding-top: 1rem; }
 .detail-list, .finding-list { margin: 0; padding: 0; list-style: none; }

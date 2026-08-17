@@ -112,6 +112,12 @@ jobs:
             files = @($files)
           } | ConvertTo-Json -Depth 5 | Set-Content portable\release-manifest.json -Encoding UTF8
           Compress-Archive -Path portable\* -DestinationPath TextVerbessern-Windows.zip -Force
+          $zipHash = (Get-FileHash -Algorithm SHA256 -LiteralPath TextVerbessern-Windows.zip).Hash.ToLowerInvariant()
+          $browserHash = (Get-FileHash -Algorithm SHA256 -LiteralPath web\TextVerbessern-Browser.html).Hash.ToLowerInvariant()
+          @(
+            "$zipHash  TextVerbessern-Windows.zip"
+            "$browserHash  TextVerbessern-Browser.html"
+          ) | Set-Content SHA256SUMS.txt -Encoding ascii
       - name: Verify exact downloadable archive
         shell: pwsh
         run: |
@@ -160,48 +166,179 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: TextVerbessern-Windows
-          path: TextVerbessern-Windows.zip
+          path: |
+            TextVerbessern-Windows.zip
+            web\TextVerbessern-Browser.html
+            SHA256SUMS.txt
           retention-days: 30
-      - name: Publish stable portable download
+      - name: Publish immutable version release
+        id: publish_immutable
         if: github.ref == 'refs/heads/main'
         timeout-minutes: 5
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          $version = python -c "from app import __version__; print(__version__)"
+          $versionTag = "v$version"
+          # A release already bound to this exact commit is the durable source
+          # of truth on a workflow re-run.  The ZIP intentionally contains a
+          # build timestamp, so a freshly rebuilt ZIP need not have its hash.
+          $releaseAssetSource = "local"
+
+          function Resolve-TagCommit([string]$tag) {
+            $reference = gh api "repos/$env:GITHUB_REPOSITORY/git/ref/tags/$tag" 2>$null
+            $referenceExit = $LASTEXITCODE
+            if ($referenceExit -eq 1) { return $null }
+            if ($referenceExit -ne 0) { throw "Could not read tag $tag" }
+            $object = ($reference | ConvertFrom-Json).object
+            while ([string]$object.type -eq 'tag') {
+              $tagObjectJson = gh api "repos/$env:GITHUB_REPOSITORY/git/tags/$($object.sha)"
+              if ($LASTEXITCODE -ne 0) { throw "Could not resolve tag $tag" }
+              $object = ($tagObjectJson | ConvertFrom-Json).object
+            }
+            if ([string]$object.type -ne 'commit') {
+              throw "Tag $tag does not resolve to a commit."
+            }
+            return [string]$object.sha
+          }
+
+          $existingTagCommit = Resolve-TagCommit $versionTag
+          if ($null -ne $existingTagCommit -and $existingTagCommit -ne $env:GITHUB_SHA) {
+            throw "Version $versionTag already targets $existingTagCommit, not $env:GITHUB_SHA. Refusing to replace an immutable release."
+          }
+
+          $existingRelease = gh release view $versionTag --json isDraft,isPrerelease 2>$null
+          $existingReleaseExit = $LASTEXITCODE
+          if ($existingReleaseExit -eq 0) {
+            if ($null -eq $existingTagCommit -or $existingTagCommit -ne $env:GITHUB_SHA) {
+              throw "Existing release $versionTag is not bound to $env:GITHUB_SHA."
+            }
+            $releaseMetadata = $existingRelease | ConvertFrom-Json
+            if ($releaseMetadata.isDraft -or $releaseMetadata.isPrerelease) {
+              throw "Existing $versionTag is not a standard published immutable version release."
+            }
+            $releaseAssetSource = "immutable"
+          } elseif ($existingReleaseExit -eq 1) {
+            gh release create $versionTag TextVerbessern-Windows.zip web\TextVerbessern-Browser.html SHA256SUMS.txt `
+              --target "$env:GITHUB_SHA" `
+              --title "Text verbessern v$version" `
+              --notes "Unveränderliche lokale Windows-Version für Commit $env:GITHUB_SHA. SHA256SUMS.txt prüft beide Downloads. Kein Cloud-Fallback."
+            if ($LASTEXITCODE -ne 0) { throw "Could not create immutable version release $versionTag." }
+          } else {
+            throw "Could not inspect release $versionTag."
+          }
+
+          $publishedTagCommit = Resolve-TagCommit $versionTag
+          if ($publishedTagCommit -ne $env:GITHUB_SHA) {
+            throw "Immutable version tag $versionTag does not target $env:GITHUB_SHA."
+          }
+          "release_asset_source=$releaseAssetSource" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+      - name: Verify published immutable version release
+        if: github.ref == 'refs/heads/main'
+        timeout-minutes: 5
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ASSET_SOURCE: ${{ steps.publish_immutable.outputs.release_asset_source }}
+        run: |
+          $version = python -c "from app import __version__; print(__version__)"
+          $versionTag = "v$version"
+          $releaseMetadata = gh release view $versionTag --json isDraft,isPrerelease | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw "Could not verify immutable release $versionTag." }
+          if ($releaseMetadata.isDraft -or $releaseMetadata.isPrerelease) {
+            throw "$versionTag must be a standard published version release."
+          }
+          $directory = 'published-check\immutable'
+          $assetDirectory = 'release-assets'
+          New-Item -ItemType Directory -Force -Path $directory, $assetDirectory | Out-Null
+          gh release download $versionTag `
+            --pattern TextVerbessern-Windows.zip `
+            --pattern TextVerbessern-Browser.html `
+            --pattern SHA256SUMS.txt `
+            --dir $directory `
+            --clobber
+          if ($LASTEXITCODE -ne 0) { throw "Could not download immutable release $versionTag." }
+          $publishedZipHash = (Get-FileHash -Algorithm SHA256 -LiteralPath "$directory\TextVerbessern-Windows.zip").Hash.ToLowerInvariant()
+          $publishedBrowserHash = (Get-FileHash -Algorithm SHA256 -LiteralPath "$directory\TextVerbessern-Browser.html").Hash.ToLowerInvariant()
+          $checksums = Get-Content -LiteralPath "$directory\SHA256SUMS.txt"
+          if ($checksums -notcontains "$publishedZipHash  TextVerbessern-Windows.zip") { throw 'Immutable SHA256SUMS does not match the ZIP download.' }
+          if ($checksums -notcontains "$publishedBrowserHash  TextVerbessern-Browser.html") { throw 'Immutable SHA256SUMS does not match the browser download.' }
+          if ($env:RELEASE_ASSET_SOURCE -eq 'local') {
+            # Only a release created in this run is compared with the fresh
+            # local build.  A later run uses the previously verified immutable
+            # files because the ZIP's build timestamp is intentionally variable.
+            $zipHash = (Get-FileHash -Algorithm SHA256 -LiteralPath TextVerbessern-Windows.zip).Hash.ToLowerInvariant()
+            $browserHash = (Get-FileHash -Algorithm SHA256 -LiteralPath web\TextVerbessern-Browser.html).Hash.ToLowerInvariant()
+            if ($publishedZipHash -ne $zipHash) { throw "Immutable ZIP hash mismatch: $publishedZipHash != $zipHash" }
+            if ($publishedBrowserHash -ne $browserHash) { throw "Immutable browser file hash mismatch: $publishedBrowserHash != $browserHash" }
+          } elseif ($env:RELEASE_ASSET_SOURCE -ne 'immutable') {
+            throw "Unknown immutable release asset source: $env:RELEASE_ASSET_SOURCE"
+          }
+          Copy-Item "$directory\TextVerbessern-Windows.zip", "$directory\TextVerbessern-Browser.html", "$directory\SHA256SUMS.txt" -Destination $assetDirectory -Force
+      - name: Update portable-latest convenience release
+        if: github.ref == 'refs/heads/main'
+        timeout-minutes: 5
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = python -c "from app import __version__; print(__version__)"
+          $notes = "Beweglicher Download-Link auf die unveränderliche Version v$version. Für einen reproduzierbaren Bezug bitte v$version verwenden. Keine Installation und kein Cloud-Fallback."
+          $assetDirectory = 'release-assets'
+          $zip = Join-Path $assetDirectory 'TextVerbessern-Windows.zip'
+          $browser = Join-Path $assetDirectory 'TextVerbessern-Browser.html'
+          $checksums = Join-Path $assetDirectory 'SHA256SUMS.txt'
+          foreach ($asset in @($zip, $browser, $checksums)) {
+            if (-not (Test-Path -LiteralPath $asset -PathType Leaf)) {
+              throw "Verified immutable release asset is missing: $asset"
+            }
+          }
           gh release view portable-latest 2>$null
           if ($LASTEXITCODE -eq 0) {
             gh api --method PATCH `
               "repos/$env:GITHUB_REPOSITORY/git/refs/tags/portable-latest" `
               -f sha="$env:GITHUB_SHA" -F force=true | Out-Null
-            gh release upload portable-latest TextVerbessern-Windows.zip web\TextVerbessern-Browser.html --clobber
+            gh release upload portable-latest $zip $browser $checksums --clobber
           } else {
-            gh release create portable-latest TextVerbessern-Windows.zip web\TextVerbessern-Browser.html `
+            gh release create portable-latest $zip $browser $checksums `
               --target "$env:GITHUB_SHA" `
               --prerelease `
               --title "Text verbessern – aktueller Windows-Download" `
               --notes "Portable, lokale Windows-Version. Keine Installation und kein Cloud-Fallback."
           }
-      - name: Verify published stable download
+          gh release edit portable-latest `
+            --prerelease `
+            --title "Text verbessern – aktueller Download (v$version)" `
+            --notes "$notes"
+      - name: Verify published portable-latest download
         if: github.ref == 'refs/heads/main'
         timeout-minutes: 5
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          New-Item -ItemType Directory -Force published-check | Out-Null
+          $reference = gh api "repos/$env:GITHUB_REPOSITORY/git/ref/tags/portable-latest" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw 'Could not verify portable-latest tag.' }
+          if ([string]$reference.object.type -ne 'commit' -or [string]$reference.object.sha -ne $env:GITHUB_SHA) {
+            throw "portable-latest does not target $env:GITHUB_SHA."
+          }
+          $directory = 'published-check\portable-latest'
+          $assetDirectory = 'release-assets'
+          New-Item -ItemType Directory -Force $directory | Out-Null
           gh release download portable-latest `
             --pattern TextVerbessern-Windows.zip `
             --pattern TextVerbessern-Browser.html `
-            --dir published-check `
+            --pattern SHA256SUMS.txt `
+            --dir $directory `
             --clobber
-          $localHash = (Get-FileHash -Algorithm SHA256 -LiteralPath TextVerbessern-Windows.zip).Hash
-          $publishedHash = (Get-FileHash -Algorithm SHA256 -LiteralPath published-check\TextVerbessern-Windows.zip).Hash
-          if ($publishedHash -ne $localHash) {
-            throw "Published download hash mismatch: $publishedHash != $localHash"
-          }
-          $localBrowserHash = (Get-FileHash -Algorithm SHA256 -LiteralPath web\TextVerbessern-Browser.html).Hash
-          $publishedBrowserHash = (Get-FileHash -Algorithm SHA256 -LiteralPath published-check\TextVerbessern-Browser.html).Hash
-          if ($publishedBrowserHash -ne $localBrowserHash) {
-            throw "Published browser file hash mismatch: $publishedBrowserHash != $localBrowserHash"
-          }
+          if ($LASTEXITCODE -ne 0) { throw 'Could not download portable-latest release assets.' }
+          $zipHash = (Get-FileHash -Algorithm SHA256 -LiteralPath "$assetDirectory\TextVerbessern-Windows.zip").Hash.ToLowerInvariant()
+          $browserHash = (Get-FileHash -Algorithm SHA256 -LiteralPath "$assetDirectory\TextVerbessern-Browser.html").Hash.ToLowerInvariant()
+          $publishedZipHash = (Get-FileHash -Algorithm SHA256 -LiteralPath "$directory\TextVerbessern-Windows.zip").Hash.ToLowerInvariant()
+          $publishedBrowserHash = (Get-FileHash -Algorithm SHA256 -LiteralPath "$directory\TextVerbessern-Browser.html").Hash.ToLowerInvariant()
+          if ($publishedZipHash -ne $zipHash) { throw "portable-latest ZIP hash mismatch: $publishedZipHash != $zipHash" }
+          if ($publishedBrowserHash -ne $browserHash) { throw "portable-latest browser file hash mismatch: $publishedBrowserHash != $browserHash" }
+          $checksums = Get-Content -LiteralPath "$directory\SHA256SUMS.txt"
+          if ($checksums -notcontains "$zipHash  TextVerbessern-Windows.zip") { throw 'portable-latest SHA256SUMS does not match the ZIP download.' }
+          if ($checksums -notcontains "$browserHash  TextVerbessern-Browser.html") { throw 'portable-latest SHA256SUMS does not match the browser download.' }

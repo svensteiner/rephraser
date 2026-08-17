@@ -22,6 +22,12 @@ dist/
 portable/
 published-check/
 
+# Generated package metadata and example output files
+/editorial_transformer.egg-info/
+/examples/*.edited.md
+/examples/*.edited.md.audit.json
+/examples/*.edited.md.diff.txt
+
 # Local editor and operating-system files
 .vscode/
 .idea/

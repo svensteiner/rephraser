@@ -189,6 +189,159 @@ def test_detects_uncertainty_moved_to_a_different_material_claim() -> None:
     assert any(warning.kind == "altered_uncertainty_scope" for warning in warnings)
 
 
+@pytest.mark.parametrize(
+    ("original", "rewritten"),
+    [
+        (
+            "The company may sell the assets and the account cannot transfer the shares.",
+            "The company cannot sell the assets and the account may transfer the shares.",
+        ),
+        (
+            "Die Gesellschaft darf die Vermögenswerte verkaufen und das Konto kann die Anteile nicht übertragen.",
+            "Die Gesellschaft kann die Vermögenswerte nicht verkaufen und das Konto darf die Anteile übertragen.",
+        ),
+    ],
+)
+def test_detects_state_relocation_across_repeated_subject_conjunctions(
+    original: str,
+    rewritten: str,
+) -> None:
+    warnings = validate_preservation(original, rewritten, extract_semantics(original))
+    assert any(warning.kind == "altered_negation_scope" for warning in warnings)
+
+
+@pytest.mark.parametrize(
+    ("original", "rewritten", "warning_kind", "value"),
+    [
+        (
+            "Alpha GmbH signed on 12.03.2026; Beta GmbH signed later.",
+            "Alpha GmbH signed later; Beta GmbH signed on 12.03.2026.",
+            "reassigned_date_context",
+            "12.03.2026",
+        ),
+        (
+            "Alpha GmbH reported EUR 10 revenue; Beta GmbH reported revenue.",
+            "Alpha GmbH reported revenue; Beta GmbH reported EUR 10 revenue.",
+            "reassigned_numeric_context",
+            "EUR 10",
+        ),
+        (
+            "Entity,Amount\nAlpha GmbH,10\nBeta GmbH,-",
+            "Entity,Amount\nAlpha GmbH,-\nBeta GmbH,10",
+            "reassigned_numeric_context",
+            "10",
+        ),
+        (
+            "Entity\tAmount\nAlpha GmbH\t10\nBeta GmbH\t-",
+            "Entity\tAmount\nAlpha GmbH\t-\nBeta GmbH\t10",
+            "reassigned_numeric_context",
+            "10",
+        ),
+    ],
+)
+def test_detects_lone_value_reassigned_between_clear_entities(
+    original: str,
+    rewritten: str,
+    warning_kind: str,
+    value: str,
+) -> None:
+    warnings = validate_preservation(original, rewritten, extract_semantics(original))
+    assert any(warning.kind == warning_kind and warning.value == value for warning in warnings)
+
+
+def test_allows_lone_value_rewording_with_the_same_clear_entity() -> None:
+    original = "Alpha GmbH signed on 12.03.2026."
+    rewritten = "On 12.03.2026, Alpha GmbH signed."
+    warnings = validate_preservation(original, rewritten, extract_semantics(original))
+    assert not any(warning.kind == "reassigned_date_context" for warning in warnings)
+
+
+@pytest.mark.parametrize(
+    ("original", "rewritten", "warning_kind"),
+    [
+        (
+            "Revenue was 10 million euros in Q1.",
+            "Revenue was 10 billion euros in Q1.",
+            "changed_monetary_scale",
+        ),
+        (
+            "The interest rate increased by 10 basis points.",
+            "The interest rate increased by 10 percentage points.",
+            "changed_quantity_unit",
+        ),
+        (
+            "Payment is due within 30 days.",
+            "Payment is due within 30 months.",
+            "changed_quantity_unit",
+        ),
+        (
+            "The company issued 10 million shares.",
+            "The company issued 10 billion shares.",
+            "changed_quantity_unit",
+        ),
+    ],
+)
+def test_detects_written_money_and_quantity_unit_or_scale_changes(
+    original: str,
+    rewritten: str,
+    warning_kind: str,
+) -> None:
+    warnings = validate_preservation(original, rewritten, extract_semantics(original))
+    assert any(warning.kind == warning_kind for warning in warnings)
+
+
+def test_allows_equivalent_quantity_unit_spelling() -> None:
+    original = "The interest rate increased by 10 bp."
+    rewritten = "The interest rate increased by 10 basis points."
+    warnings = validate_preservation(original, rewritten, extract_semantics(original))
+    assert not any(warning.kind == "changed_quantity_unit" for warning in warnings)
+
+
+@pytest.mark.parametrize(
+    ("original", "rewritten", "warning_kind", "marker"),
+    [
+        (
+            "The value must exceed EUR 10.",
+            "The value must be below EUR 10.",
+            "changed_claim_comparator",
+            "strict threshold: exceed -> below",
+        ),
+        (
+            "Payment is due no later than 31 March 2026.",
+            "Payment is due no earlier than 31 March 2026.",
+            "changed_claim_comparator",
+            "deadline: no later than -> no earlier than",
+        ),
+        (
+            "The audit passed.",
+            "The audit failed.",
+            "changed_material_status",
+            "audit outcome: passed -> failed",
+        ),
+        (
+            "The control is compliant with the policy.",
+            "The control is non-compliant with the policy.",
+            "changed_material_status",
+            "compliance status: compliant -> non-compliant",
+        ),
+        (
+            "The company reported a profit.",
+            "The company reported a loss.",
+            "changed_claim_polarity",
+            "financial result: profit -> loss",
+        ),
+    ],
+)
+def test_detects_explicit_high_risk_legal_financial_pairs(
+    original: str,
+    rewritten: str,
+    warning_kind: str,
+    marker: str,
+) -> None:
+    warnings = validate_preservation(original, rewritten, extract_semantics(original))
+    assert any(warning.kind == warning_kind and warning.value == marker for warning in warnings)
+
+
 def test_detects_at_least_to_at_most_comparator_inversion() -> None:
     original = "At least 10 reports are required."
     rewritten = "At most 10 reports are required."

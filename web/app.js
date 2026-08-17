@@ -17,6 +17,7 @@ const elements = {
   status: document.querySelector("#status-message"),
   error: document.querySelector("#error-message"),
   characterCount: document.querySelector("#character-count"),
+  modeHelp: document.querySelector("#mode-help"),
   resultSection: document.querySelector("#result-section"),
   resultHeading: document.querySelector("#result-heading"),
   originalPreview: document.querySelector("#original-preview"),
@@ -29,10 +30,15 @@ const elements = {
   saveButton: document.querySelector("#save-button"),
   auditButton: document.querySelector("#audit-button"),
   clearButton: document.querySelector("#clear-button"),
+  reviewConfirmation: document.querySelector("#review-confirmation"),
+  reviewCheckbox: document.querySelector("#review-checkbox"),
 };
 
 let currentResult = null;
 let isTransforming = false;
+let inputVersion = 0;
+let nextRequestId = 0;
+let activeRequestId = null;
 
 function formatNumber(value) {
   return Number(value).toLocaleString("de-DE");
@@ -58,6 +64,63 @@ function selectedMode() {
   return document.querySelector("input[name='mode']:checked").value;
 }
 
+function transformButtonLabel() {
+  return selectedMode() === MODE_FAST ? "Formulierungen glätten" : "Format bereinigen";
+}
+
+function resultNeedsReview(result = currentResult) {
+  return Boolean(
+    result
+    && result.mode === MODE_FAST
+    && result.modifications.some((change) => change.kind.startsWith("phrase_rule_")),
+  );
+}
+
+function setResultActions() {
+  const hasResult = Boolean(currentResult);
+  const reviewRequired = resultNeedsReview();
+  const reviewConfirmed = elements.reviewCheckbox.checked;
+  elements.reviewConfirmation.hidden = !reviewRequired;
+  elements.reviewCheckbox.disabled = isTransforming || !reviewRequired;
+  elements.copyButton.disabled = isTransforming || !hasResult || (reviewRequired && !reviewConfirmed);
+  elements.saveButton.disabled = isTransforming || !hasResult;
+  elements.auditButton.disabled = isTransforming || !hasResult;
+  elements.clearButton.disabled = isTransforming;
+}
+
+function updateModeGuidance() {
+  const usingFastMode = selectedMode() === MODE_FAST;
+  elements.modeHelp.textContent = usingFastMode
+    ? "Sprachliche Glättung ist aktiv. Prüfe die Änderungen; Kopieren wird erst nach deiner Bestätigung freigegeben."
+    : "Standard: Nur Copy/Paste- und Format-Artefakte bereinigen. Danach kannst du direkt kopieren.";
+  if (!isTransforming) {
+    elements.transformButton.textContent = transformButtonLabel();
+  }
+}
+
+function createTransformationRequest(source, mode, protectedTermsInput, protectedTerms) {
+  return Object.freeze({
+    id: ++nextRequestId,
+    inputVersion,
+    source,
+    mode,
+    protectedTermsInput,
+    protectedTerms: Object.freeze([...protectedTerms]),
+  });
+}
+
+function isCurrentRequest(request) {
+  return activeRequestId === request.id
+    && inputVersion === request.inputVersion
+    && elements.source.value === request.source
+    && selectedMode() === request.mode
+    && elements.protectedTerms.value === request.protectedTermsInput;
+}
+
+function discardStaleRequest() {
+  setStatus("Die Eingabe wurde während der Bearbeitung geändert. Das Ergebnis wurde verworfen – bitte erneut starten.", "ready");
+}
+
 function updateCharacterCount() {
   const count = Array.from(elements.source.value).length;
   elements.characterCount.textContent = `${formatNumber(count)} Zeichen`;
@@ -66,15 +129,25 @@ function updateCharacterCount() {
   }
 }
 
-function invalidateResult() {
-  if (!currentResult) {
-    return;
-  }
+function invalidateResult({ announce = true } = {}) {
+  const hadResult = Boolean(currentResult);
   currentResult = null;
   elements.resultSection.hidden = true;
   elements.resultText.value = "";
   elements.originalPreview.value = "";
-  setStatus("Eingabe geändert. Bitte Text erneut verbessern.", "ready");
+  elements.reviewCheckbox.checked = false;
+  setResultActions();
+  if (announce && hadResult) {
+    setStatus("Eingabe geändert. Bitte Text erneut verbessern.", "ready");
+  }
+}
+
+function noteInputChanged() {
+  inputVersion += 1;
+  invalidateResult({ announce: !isTransforming });
+  if (isTransforming) {
+    setStatus("Eingabe geändert. Das laufende Ergebnis wird verworfen.", "working");
+  }
 }
 
 function statLabel(statistics) {
@@ -132,6 +205,7 @@ function renderFindings(result) {
 
 function renderResult(result) {
   currentResult = result;
+  elements.reviewCheckbox.checked = false;
   elements.originalPreview.value = result.original;
   elements.resultText.value = result.rewritten;
   elements.beforeStats.textContent = statLabel(result.before_statistics);
@@ -139,20 +213,46 @@ function renderResult(result) {
   renderChanges(result);
   renderFindings(result);
   elements.resultSection.hidden = false;
+  setResultActions();
   const behavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
   elements.resultSection.scrollIntoView({ behavior, block: "start" });
   elements.resultHeading.focus({ preventScroll: true });
-  const modeDescription = result.mode === MODE_FAST ? "Schnellfassung" : "Formatbereinigung";
-  setStatus(`${modeDescription} fertig. Bitte Ergebnis vor dem Verwenden lesen.`, "ready");
+  if (resultNeedsReview(result)) {
+    setStatus("Sprachliche Glättung fertig. Prüfe die Änderungen und bestätige sie vor dem Kopieren.", "ready");
+  } else {
+    setStatus("Formatbereinigung fertig. Du kannst das Ergebnis kopieren.", "ready");
+  }
 }
 
 function setTransformBusy(isBusy) {
   elements.transformButton.disabled = isBusy;
-  elements.transformButton.textContent = isBusy ? "Wird lokal bearbeitet …" : "Text verbessern";
+  elements.transformButton.textContent = isBusy ? "Wird lokal bearbeitet …" : transformButtonLabel();
+  elements.source.readOnly = isBusy;
+  elements.protectedTerms.readOnly = isBusy;
+  elements.pasteButton.disabled = isBusy;
+  elements.fileInput.disabled = isBusy;
+  document.querySelectorAll("input[name='mode']").forEach((input) => {
+    input.disabled = isBusy;
+  });
+  setResultActions();
 }
 
 function nextPaint() {
-  return new Promise((resolve) => window.requestAnimationFrame(resolve));
+  return new Promise((resolve) => {
+    let finished = false;
+    const finish = () => {
+      if (!finished) {
+        finished = true;
+        resolve();
+      }
+    };
+    if (typeof window.requestAnimationFrame === "function") {
+      window.requestAnimationFrame(finish);
+    }
+    // Background tabs may pause animation frames. Keep the visible progress
+    // state from turning into an indefinite wait in that case.
+    window.setTimeout(finish, 250);
+  });
 }
 
 async function runTransformation() {
@@ -161,22 +261,35 @@ async function runTransformation() {
   }
   clearError();
   const source = elements.source.value;
+  const mode = selectedMode();
+  const protectedTermsInput = elements.protectedTerms.value;
   if (!source.trim()) {
     showError(["Bitte zuerst Text einfügen oder eine .txt/.md-Datei öffnen."]);
     elements.source.focus();
     return;
   }
-  const protectedTerms = normalizeProtectedTerms(elements.protectedTerms.value);
+  const protectedTerms = normalizeProtectedTerms(protectedTermsInput);
   if (protectedTerms.errors.length) {
     showError(protectedTerms.errors);
     return;
   }
+  const request = createTransformationRequest(source, mode, protectedTermsInput, protectedTerms.terms);
+  activeRequestId = request.id;
+  invalidateResult({ announce: false });
   isTransforming = true;
   setTransformBusy(true);
   setStatus("Bearbeite lokal in diesem Browser-Tab …", "working");
   try {
     await nextPaint();
-    const result = transformText(source, { mode: selectedMode(), protectedTerms: protectedTerms.terms });
+    if (!isCurrentRequest(request)) {
+      discardStaleRequest();
+      return;
+    }
+    const result = transformText(request.source, { mode: request.mode, protectedTerms: request.protectedTerms });
+    if (!isCurrentRequest(request)) {
+      discardStaleRequest();
+      return;
+    }
     if (result.blocked) {
       const messages = [...result.errors];
       if (result.missing_protected_terms.length) {
@@ -186,13 +299,21 @@ async function runTransformation() {
       return;
     }
     renderResult(result);
+  } catch (_error) {
+    showError(["Die lokale Bearbeitung konnte nicht abgeschlossen werden. Bitte Eingabe prüfen und erneut versuchen."]);
   } finally {
-    isTransforming = false;
-    setTransformBusy(false);
+    if (activeRequestId === request.id) {
+      activeRequestId = null;
+      isTransforming = false;
+      setTransformBusy(false);
+    }
   }
 }
 
 async function pasteFromClipboard() {
+  if (isTransforming) {
+    return;
+  }
   clearError();
   try {
     if (!navigator.clipboard?.readText) {
@@ -201,7 +322,7 @@ async function pasteFromClipboard() {
     const text = await navigator.clipboard.readText();
     elements.source.value = text;
     updateCharacterCount();
-    invalidateResult();
+    noteInputChanged();
     setStatus("Zwischenablage eingefügt. Du kannst den Text jetzt verbessern.", "ready");
     elements.source.focus();
   } catch (_error) {
@@ -210,6 +331,9 @@ async function pasteFromClipboard() {
 }
 
 async function loadLocalFile() {
+  if (isTransforming) {
+    return;
+  }
   clearError();
   const [file] = elements.fileInput.files;
   if (!file) {
@@ -231,7 +355,7 @@ async function loadLocalFile() {
     }
     elements.source.value = text;
     updateCharacterCount();
-    invalidateResult();
+    noteInputChanged();
     setStatus(`Datei „${file.name}“ lokal geöffnet.`, "ready");
   } catch (_error) {
     showError(["Die Datei muss UTF-8 oder UTF-16 sein und darf maximal 2.000.000 Zeichen enthalten."]);
@@ -252,7 +376,12 @@ function download(filename, content, mediaType) {
 }
 
 async function copyResult() {
-  if (!currentResult) {
+  if (!currentResult || isTransforming) {
+    return;
+  }
+  if (resultNeedsReview() && !elements.reviewCheckbox.checked) {
+    elements.reviewCheckbox.focus();
+    setStatus("Bitte bestätige nach der Prüfung die sprachlichen Änderungen, bevor du kopierst.", "ready");
     return;
   }
   try {
@@ -272,7 +401,7 @@ async function copyResult() {
 }
 
 function saveResult() {
-  if (!currentResult) {
+  if (!currentResult || isTransforming) {
     return;
   }
   download("text-verbessert.txt", currentResult.rewritten, "text/plain;charset=utf-8");
@@ -280,7 +409,7 @@ function saveResult() {
 }
 
 async function saveAudit() {
-  if (!currentResult) {
+  if (!currentResult || isTransforming) {
     return;
   }
   try {
@@ -293,27 +422,31 @@ async function saveAudit() {
 }
 
 function clearAll() {
+  if (isTransforming) {
+    return;
+  }
   if ((elements.source.value || elements.resultText.value) && !window.confirm("Eingabe und Ergebnis wirklich leeren?")) {
     return;
   }
-  currentResult = null;
+  inputVersion += 1;
+  invalidateResult({ announce: false });
   elements.source.value = "";
   elements.protectedTerms.value = "";
-  elements.resultText.value = "";
-  elements.originalPreview.value = "";
-  elements.resultSection.hidden = true;
   clearError();
   updateCharacterCount();
-  setStatus("Bereit. Die Bearbeitung erfolgt lokal in diesem Tab.", "ready");
+  setStatus("Bereit. Standardmäßig wird nur das Format lokal bereinigt.", "ready");
   elements.source.focus();
 }
 
 elements.source.addEventListener("input", () => {
   updateCharacterCount();
-  invalidateResult();
+  noteInputChanged();
 });
-elements.protectedTerms.addEventListener("input", invalidateResult);
-document.querySelectorAll("input[name='mode']").forEach((input) => input.addEventListener("change", invalidateResult));
+elements.protectedTerms.addEventListener("input", noteInputChanged);
+document.querySelectorAll("input[name='mode']").forEach((input) => input.addEventListener("change", () => {
+  noteInputChanged();
+  updateModeGuidance();
+}));
 elements.transformButton.addEventListener("click", runTransformation);
 elements.pasteButton.addEventListener("click", pasteFromClipboard);
 elements.fileInput.addEventListener("change", loadLocalFile);
@@ -321,6 +454,12 @@ elements.copyButton.addEventListener("click", copyResult);
 elements.saveButton.addEventListener("click", saveResult);
 elements.auditButton.addEventListener("click", saveAudit);
 elements.clearButton.addEventListener("click", clearAll);
+elements.reviewCheckbox.addEventListener("change", () => {
+  setResultActions();
+  if (currentResult && resultNeedsReview() && elements.reviewCheckbox.checked) {
+    setStatus("Prüfung bestätigt. Das Ergebnis kann jetzt kopiert werden.", "ready");
+  }
+});
 document.addEventListener("keydown", (event) => {
   if (event.ctrlKey && event.key === "Enter") {
     event.preventDefault();
@@ -329,3 +468,5 @@ document.addEventListener("keydown", (event) => {
 });
 
 updateCharacterCount();
+updateModeGuidance();
+setResultActions();

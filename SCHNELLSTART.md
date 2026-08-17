@@ -16,12 +16,16 @@ Python, Administratorrechte und eine Installation sind dafür nicht erforderlich
 
 1. Lade **TextVerbessern-Browser.html** von der aktuellen GitHub-Release-Seite herunter.
 2. Öffne die Datei mit einem aktuellen Browser.
-3. Füge den Text ein, klicke auf **Text verbessern** und danach auf **Ergebnis kopieren**.
+3. Füge den Text ein, klicke auf **Format bereinigen** und danach auf **Ergebnis kopieren**.
 
 Diese Ausgabe arbeitet vollständig in der geöffneten Datei und benötigt weder Python
 noch einen Server. Sie verwendet keine Cloud-API und kein Mistral-Modell. Das Ergebnis
 ist eine schnelle, regelbasierte Bereinigung; wichtige Texte bitte vor dem Versenden
 selbst lesen.
+
+**Format bereinigen** ist die sichere Voreinstellung. Für wenige feste sprachliche
+Glättungen wähle zuerst **Formulierungen glätten**; danach wird das Kopieren erst nach
+deiner sichtbaren Prüfbestätigung freigegeben.
 
 ## Start aus dem Quellcode
 

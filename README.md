@@ -85,13 +85,18 @@ Für einen gesperrten oder fremden PC gibt es zwei Wege ohne Python oder Install
 
 1. [`TextVerbessern-Browser.html`](https://github.com/svensteiner/rephraser/releases/download/portable-latest/TextVerbessern-Browser.html) herunterladen.
 2. Die Datei mit einem aktuellen Browser öffnen.
-3. Text einfügen, **Text verbessern** klicken und das Ergebnis kopieren.
+3. Text einfügen, **Format bereinigen** klicken und das Ergebnis kopieren.
 
 Die Datei enthält die Anwendung vollständig und braucht keinen Server, kein Konto und
 keine GitHub-Pages-Freischaltung. Die Anwendung selbst baut keine Netzwerkverbindung,
 verwendet kein Mistral-Modell und keinen Cloud-Fallback. Browser-Erweiterungen,
 Zwischenablage und Downloads folgen weiterhin den Einstellungen von Browser und
 Betriebssystem.
+
+Die sichere **Formatbereinigung** ist bewusst voreingestellt: Sie entfernt nur
+Copy/Paste- und Unicode-Artefakte. Wer zusätzlich wenige feste Formulierungen glätten
+möchte, wählt **Formulierungen glätten** ausdrücklich aus. Bei sprachlichen Änderungen
+bleibt **Ergebnis kopieren** gesperrt, bis die sichtbare Prüfbestätigung gesetzt wurde.
 
 ### Browser-Adresse – nach einmaliger Pages-Freigabe
 

@@ -51,20 +51,21 @@
           <legend>2 · Wie soll der Text bearbeitet werden?</legend>
           <div class="mode-grid">
             <label class="mode-option">
-              <input type="radio" name="mode" value="fast" checked>
+              <input type="radio" name="mode" value="safe" checked>
               <span class="mode-card">
-                <strong>Schnell verbessern <span class="recommended">Empfohlen</span></strong>
-                <span>Bereinigt Copy/Paste-Artefakte und glättet wenige feste DE/EN-Formulierungen.</span>
-              </span>
-            </label>
-            <label class="mode-option">
-              <input type="radio" name="mode" value="safe">
-              <span class="mode-card">
-                <strong>Nur Format bereinigen</strong>
+                <strong>Nur Format bereinigen <span class="recommended">Empfohlen</span></strong>
                 <span>Normalisiert Unicode und Leerzeichen – ohne Formulierungen zu ändern.</span>
               </span>
             </label>
+            <label class="mode-option">
+              <input type="radio" name="mode" value="fast">
+              <span class="mode-card">
+                <strong>Formulierungen glätten</strong>
+                <span>Ändert zusätzlich wenige feste Formulierungen. Bitte jede sprachliche Änderung prüfen.</span>
+              </span>
+            </label>
           </div>
+          <p class="mode-help" id="mode-help">Standard: Nur Copy/Paste- und Format-Artefakte bereinigen. Danach kannst du direkt kopieren.</p>
         </fieldset>
 
         <details class="protect-details">
@@ -75,8 +76,8 @@
         </details>
 
         <div class="primary-row">
-          <button class="button button-primary" id="transform-button" type="button">Text verbessern</button>
-          <p class="status state-ready" id="status-message" role="status" aria-live="polite">Bereit. Die Bearbeitung erfolgt lokal in diesem Tab.</p>
+          <button class="button button-primary" id="transform-button" type="button">Format bereinigen</button>
+          <p class="status state-ready" id="status-message" role="status" aria-live="polite">Bereit. Standardmäßig wird nur das Format lokal bereinigt.</p>
         </div>
         <p class="error-message" id="error-message" role="alert" hidden></p>
       </section>
@@ -88,10 +89,15 @@
             <h2 id="result-heading" tabindex="-1">Fertiger Text</h2>
           </div>
           <div class="header-actions">
-            <button class="button button-secondary" id="copy-button" type="button">Ergebnis kopieren</button>
+            <button class="button button-secondary" id="copy-button" type="button" disabled>Ergebnis kopieren</button>
             <button class="button button-secondary" id="save-button" type="button">.txt speichern</button>
             <button class="button button-quiet" id="clear-button" type="button">Leeren</button>
           </div>
+        </div>
+
+        <div class="review-confirmation" id="review-confirmation" hidden>
+          <input id="review-checkbox" type="checkbox" autocomplete="off">
+          <label for="review-checkbox">Ich habe die sprachlichen Änderungen geprüft und gebe das Ergebnis zum Kopieren frei.</label>
         </div>
 
         <div class="comparison-grid">

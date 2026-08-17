@@ -29,6 +29,11 @@ def test_browser_page_uses_only_relative_assets_and_a_strict_csp() -> None:
     assert page.count('spellcheck="false" autocomplete="off"') == 2
     assert '<noscript>' in page
     assert 'id="result-heading" tabindex="-1"' in page
+    assert '<input type="radio" name="mode" value="safe" checked>' in page
+    assert '<input type="radio" name="mode" value="fast">' in page
+    assert 'id="review-confirmation" hidden' in page
+    assert 'id="review-checkbox" type="checkbox" autocomplete="off"' in page
+    assert 'id="copy-button" type="button" disabled' in page
     assert "Diese Anwendung verarbeitet deinen Text lokal." in page
     assert "Browser, Betriebssystem und Erweiterungen können eigene Einstellungen haben." in page
     assert not re.search(r"<script(?![^>]*\bsrc=)", page, flags=re.I)
@@ -58,6 +63,11 @@ def test_browser_code_has_no_network_or_persistent_text_storage() -> None:
     assert r"\p{Cf}" in source
     assert "MAX_PROTECTED_TERM_MATCHES" in source
     assert "requestAnimationFrame" in source
+    assert "createTransformationRequest" in source
+    assert "isCurrentRequest" in source
+    assert "inputVersion" in source
+    assert "discardStaleRequest" in source
+    assert "readOnly = isBusy" in source
     assert "MAX_INPUT_FILE_BYTES" in source
     assert (WEB / ".nojekyll").is_file()
 

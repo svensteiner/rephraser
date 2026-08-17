@@ -43,6 +43,15 @@ test("local file decoder preserves a BOM and rejects unknown encodings", () => {
   assert.throws(() => decodeTextFileBytes(Uint8Array.of(0xc3, 0x28)), /UTF-8 oder UTF-16/);
 });
 
+test("browser transformation defaults to safe format cleanup", () => {
+  const result = transformText("We would like to better understand\u200B the report.");
+
+  assert.equal(result.mode, MODE_SAFE);
+  assert.equal(result.rewritten, "We would like to better understand the report.");
+  assert.ok(result.modifications.some((change) => change.kind === "zero_width_space"));
+  assert.equal(result.modifications.some((change) => change.kind.startsWith("phrase_rule_")), false);
+});
+
 test("fast browser rules improve only ordinary prose", () => {
   const source = [
     "---\ntitle: \"We would like to better understand\"\n---",

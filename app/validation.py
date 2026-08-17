@@ -15,6 +15,7 @@ from .semantic import (
     extract_monetary_amounts,
     extract_numeric_table_layouts,
     extract_payment_obligations,
+    extract_quantified_values,
     extract_reporting_periods,
     extract_semantics,
 )
@@ -88,6 +89,11 @@ HIGH_RISK_POLARITY_GROUPS: tuple[tuple[str, tuple[str, ...], tuple[str, ...]], .
             "nimmt ab",
         ),
     ),
+    (
+        "financial result",
+        ("profit", "surplus", "gain"),
+        ("loss", "deficit"),
+    ),
 )
 
 HIGH_RISK_MODAL_GROUPS: tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...] = (
@@ -113,6 +119,16 @@ HIGH_RISK_COMPARATOR_GROUPS: tuple[tuple[str, tuple[str, ...], tuple[str, ...]],
             "at most", "not more than", "no more than", "maximum",
             "h\u00f6chstens", "maximal", "nicht mehr als",
         ),
+    ),
+    (
+        "strict threshold",
+        ("exceed", "exceeds", "exceeded", "greater than", "more than"),
+        ("below", "less than", "under", "fewer than"),
+    ),
+    (
+        "deadline",
+        ("no later than", "at the latest"),
+        ("no earlier than", "at the earliest"),
     ),
 )
 
@@ -161,6 +177,16 @@ HIGH_RISK_STATUS_GROUPS: tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...
         ("confirmed", "best\u00e4tigt"),
         ("unconfirmed", "not confirmed", "unbest\u00e4tigt", "nicht best\u00e4tigt"),
     ),
+    (
+        "audit outcome",
+        ("passed", "pass", "successful"),
+        ("failed", "fail", "unsuccessful"),
+    ),
+    (
+        "compliance status",
+        ("compliant",),
+        ("non-compliant", "noncompliant"),
+    ),
 )
 
 CLAIM_TOKEN = re.compile(r"\b[\w\u00c4\u00d6\u00dc\u00e4\u00f6\u00fc\u00df-]+\b", re.UNICODE)
@@ -176,6 +202,16 @@ HIGH_RISK_MAX_RISK_CLAIMS = 2_000
 MATERIAL_CLAUSE_SPLIT = re.compile(
     r"\s*(?:;|\b(?:but|whereas|however|yet|aber|jedoch|hingegen|w\u00e4hrend)\b)\s*",
     re.I,
+)
+# Split ``and`` / ``und`` only when the following wording looks like a fresh
+# subject.  This deliberately avoids treating ordinary object lists (``assets
+# and shares``) as independent claims, while covering the risky ``A may … and
+# B cannot …`` relocation pattern.
+REPEATED_SUBJECT_CONJUNCTION = re.compile(
+    r"\s+\b(?i:and|und)\b\s+(?=(?:"
+    r"(?i:the|a|an|this|that|these|those|der|die|das|dem|den|"
+    r"ein(?:e|er|em|en|es)?)\b|"
+    r"[A-Z\u00c4\u00d6\u00dc][\w\u00c4\u00d6\u00dc\u00e4\u00f6\u00fc\u00df&.'\u2019-]*\b))"
 )
 STATE_SCOPE_IGNORED = {
     "can", "cannot", "could", "darf", "kann", "konnte", "k\u00f6nnte", "may", "might",
@@ -225,10 +261,59 @@ def _value_clause_anchors(text: str, values: list[str]) -> dict[str, set[str]]:
     return anchors
 
 
-def _reassigned_values(original: str, rewritten: str, values: list[str]) -> list[str]:
+def _single_value_entity_anchors(
+    text: str,
+    value: str,
+    entity_values: list[str],
+) -> set[str]:
+    """Return explicit preserved entities co-occurring with one protected value.
+
+    Only entities already found by the conservative name/protected-term logic
+    are considered.  This makes the guard suitable for a lone date or number
+    without guessing that every capitalized word is an entity.
+    """
+    ignored = {"eur", "usd", "chf", "gbp", "btc", "eth", "usdt"}
+    entities = {
+        candidate.casefold()
+        for candidate in entity_values
+        if candidate and candidate.casefold() not in ignored
+    }
+    if not entities:
+        return set()
+    anchors: set[str] = set()
+    folded_value = value.casefold()
+    for clause in CLAUSE_SPLIT.split(text):
+        folded_clause = clause.casefold()
+        if folded_value not in folded_clause:
+            continue
+        anchors.update(entity for entity in entities if entity in folded_clause)
+    return anchors
+
+
+def _reassigned_values(
+    original: str,
+    rewritten: str,
+    values: list[str],
+    *,
+    entity_values: list[str] = (),
+) -> list[str]:
     """Detect strong evidence that protected values exchanged factual contexts."""
     unique_values = list(dict.fromkeys(values))
-    if len(unique_values) < 2:
+    if not unique_values:
+        return []
+    if len(unique_values) == 1:
+        # A single value cannot exchange places with another protected value,
+        # but it can still move from one clearly named entity to another.  This
+        # is common in compact ledger rows, CSV/TSV pastes, and date statements.
+        value = unique_values[0]
+        source_entities = _single_value_entity_anchors(original, value, entity_values)
+        rewritten_entities = _single_value_entity_anchors(rewritten, value, entity_values)
+        if (
+            len(source_entities) == 1
+            and len(rewritten_entities) == 1
+            and source_entities != rewritten_entities
+        ):
+            return [value]
         return []
     original_anchors = _value_clause_anchors(original, unique_values)
     rewritten_anchors = _value_clause_anchors(rewritten, unique_values)
@@ -301,17 +386,12 @@ def _claim_tokens(sentence: str) -> tuple[str, ...]:
 
 
 def _material_units(claims: list[str]) -> list[str]:
-    """Split only clear contrastive clauses for state-association checks.
-
-    We intentionally do not split every ``and``/``und``: doing so turns normal
-    noun phrases into pseudo-claims and makes a fail-closed guard needlessly
-    noisy. Semicolons and contrastive conjunctions are enough to catch the
-    common "A cannot … but B can …" relocation pattern.
-    """
+    """Split contrastive and clearly repeated-subject clauses for state checks."""
     return [
         unit.strip()
         for claim in claims
-        for unit in MATERIAL_CLAUSE_SPLIT.split(claim)
+        for contrastive_unit in MATERIAL_CLAUSE_SPLIT.split(claim)
+        for unit in REPEATED_SUBJECT_CONJUNCTION.split(contrastive_unit)
         if unit.strip()
     ]
 
@@ -619,13 +699,14 @@ def _financial_marker_warning(
     source_claims: list[str],
     rewritten_claims: list[str],
 ) -> ValidationWarning | None:
-    """Reject explicit quarter or monetary-scale changes in aligned claims."""
+    """Reject aligned reporting-period, money-scale, and quantity-unit changes."""
     candidate_index: dict[str, list[int]] | None = None
     reviewed = 0
     for source_position, source_claim in enumerate(source_claims):
         source_periods = extract_reporting_periods(source_claim)
         source_amounts = extract_monetary_amounts(source_claim)
-        if not source_periods and not source_amounts:
+        source_quantities = extract_quantified_values(source_claim)
+        if not source_periods and not source_amounts and not source_quantities:
             continue
         reviewed += 1
         if reviewed > HIGH_RISK_MAX_RISK_CLAIMS:
@@ -668,6 +749,33 @@ def _financial_marker_warning(
                     ),
                     message=(
                         "The written scale of a currency amount changed in a closely aligned claim. "
+                        "The candidate must be reviewed or rejected."
+                    ),
+                )
+
+        rewritten_quantities = extract_quantified_values(rewritten_claim)
+        if len(source_quantities) == len(rewritten_quantities) == 1:
+            source_quantity = source_quantities[0]
+            rewritten_quantity = rewritten_quantities[0]
+            if (
+                source_quantity.amount == rewritten_quantity.amount
+                and (
+                    source_quantity.scale != rewritten_quantity.scale
+                    or source_quantity.unit != rewritten_quantity.unit
+                )
+            ):
+                before = " ".join(
+                    part for part in (source_quantity.scale, source_quantity.unit) if part
+                )
+                after = " ".join(
+                    part for part in (rewritten_quantity.scale, rewritten_quantity.unit) if part
+                )
+                return ValidationWarning(
+                    kind="changed_quantity_unit",
+                    severity="high",
+                    value=f"quantity: {before} -> {after}",
+                    message=(
+                        "The scale or unit of an explicit quantity changed in a closely aligned claim. "
                         "The candidate must be reviewed or rejected."
                     ),
                 )
@@ -868,8 +976,16 @@ def validate_preservation(original: str, rewritten: str, constraints: SemanticCo
         ("quotation", constraints.quotations if preserve_quotations else []),
         ("protected_term", constraints.protected_terms),
     ]
+    association_entities = list(dict.fromkeys(
+        [*constraints.names, *new_semantics.names, *constraints.protected_terms]
+    ))
     for kind, values in association_groups:
-        for value in _reassigned_values(original, rewritten, values):
+        for value in _reassigned_values(
+            original,
+            rewritten,
+            values,
+            entity_values=association_entities,
+        ):
             warnings.append(ValidationWarning(
                 kind=f"reassigned_{kind}_context",
                 severity="high",

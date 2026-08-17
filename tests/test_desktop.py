@@ -1,15 +1,20 @@
 from app.desktop import (
     CLIPBOARD_UNAVAILABLE_MESSAGE,
     KEYBOARD_SHORTCUTS,
+    MAX_OPEN_FILE_BYTES,
     MODE_AUTOMATIC,
     MODE_SAFE,
     MODE_STRONG,
+    OpenTextFileError,
     ProcessingRequest,
     STARTUP_ERROR_MESSAGE,
     STARTUP_ERROR_TITLE,
     available_modes,
+    clear_confirmation_required,
     local_mistral_ready,
+    preflight_open_text_file,
     primary_action_label,
+    read_preflighted_text_file,
     processing_settings,
     request_is_current,
     RELEASE_PAGE_URL,
@@ -149,6 +154,85 @@ def test_request_identity_requires_the_same_immutable_source_snapshot() -> None:
     assert request_is_current(request, request, current_source="Neuer Text") is False
 
 
+def test_clear_confirmation_is_required_only_when_local_content_exists() -> None:
+    assert clear_confirmation_required("", "", (), "") is False
+    assert clear_confirmation_required(" ", "", (), "") is True
+    assert clear_confirmation_required("", "Ergebnis", (), "") is True
+    assert clear_confirmation_required("", "", ("Projekt Aurora",), "") is True
+    assert clear_confirmation_required("", "", (), "Interne Ergebnisfassung") is True
+
+
+def test_cancelled_clear_preserves_everything_and_keeps_worker_current() -> None:
+    from app.desktop import DesktopApp
+
+    class TextBox:
+        def __init__(self, text: str) -> None:
+            self.text = text
+
+        def get(self, _start: str, _end: str) -> str:
+            return self.text
+
+    class MessageBox:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, str, dict[str, object]]] = []
+
+        def askyesno(self, title: str, message: str, **kwargs: object) -> bool:
+            self.calls.append((title, message, kwargs))
+            return False
+
+    app = DesktopApp.__new__(DesktopApp)
+    request = ProcessingRequest(8, "Vertraulicher Ausgangstext")
+    app.input_text = TextBox(request.source)
+    app.output_text = TextBox("Geprüftes Ergebnis")
+    app.protected_terms = ("Ausgangstext",)
+    app.generated_result = "Geprüftes Ergebnis"
+    app.active_request_id = request.request_id
+    app.active_request = request
+    app.busy = True
+    app.messagebox = MessageBox()
+    app.root = object()
+    cleared: list[bool] = []
+    app._clear_all_confirmed = lambda: cleared.append(True)
+
+    app.clear_all()
+
+    assert app.input_text.text == request.source
+    assert app.output_text.text == "Geprüftes Ergebnis"
+    assert app.protected_terms == ("Ausgangstext",)
+    assert app.generated_result == "Geprüftes Ergebnis"
+    assert app.active_request == request
+    assert app.active_request_id == request.request_id
+    assert app.busy is True
+    assert cleared == []
+    assert app.messagebox.calls[0][0] == "Text wirklich leeren?"
+    assert app.messagebox.calls[0][2]["default"] == "no"
+
+
+def test_empty_clear_does_not_prompt() -> None:
+    from app.desktop import DesktopApp
+
+    class TextBox:
+        def get(self, _start: str, _end: str) -> str:
+            return ""
+
+    class MessageBox:
+        def askyesno(self, *_args: object, **_kwargs: object) -> bool:
+            raise AssertionError("empty state must not prompt")
+
+    app = DesktopApp.__new__(DesktopApp)
+    app.input_text = TextBox()
+    app.output_text = TextBox()
+    app.protected_terms = ()
+    app.generated_result = ""
+    app.messagebox = MessageBox()
+    called: list[bool] = []
+    app._clear_all_confirmed = lambda: called.append(True)
+
+    app.clear_all()
+
+    assert called == [True]
+
+
 def test_clear_cancels_active_worker_and_rejects_its_late_result_or_error(monkeypatch) -> None:
     from app.desktop import DesktopApp
     from app.pipeline import run_pipeline
@@ -199,6 +283,11 @@ def test_clear_cancels_active_worker_and_rejects_its_late_result_or_error(monkey
     class MessageBox:
         def __init__(self) -> None:
             self.errors: list[tuple[str, str]] = []
+            self.confirmations: list[tuple[str, str, dict[str, object]]] = []
+
+        def askyesno(self, title: str, message: str, **kwargs: object) -> bool:
+            self.confirmations.append((title, message, kwargs))
+            return True
 
         def showerror(self, title: str, message: str) -> None:
             self.errors.append((title, message))
@@ -269,6 +358,7 @@ def test_clear_cancels_active_worker_and_rejects_its_late_result_or_error(monkey
     assert app.copy_button.values["state"] == "disabled"
     # Keep this marker until the abandoned Mistral worker has actually ended.
     assert app.model_request_inflight_id == request.request_id
+    assert app.messagebox.confirmations[0][0] == "Text wirklich leeren?"
 
     app._show_result(run_pipeline(request.source), "rules", request)
     app._show_error(RuntimeError("später Workerfehler"), request)
@@ -280,6 +370,107 @@ def test_clear_cancels_active_worker_and_rejects_its_late_result_or_error(monkey
     assert app.messagebox.errors == []
     assert diagnostic_events == []
     assert app.root.clipboard == []
+
+
+def test_open_file_limits_picker_to_supported_text_types_and_loads_utf8(tmp_path) -> None:
+    from app.desktop import DesktopApp
+
+    selected = tmp_path / "Brief.TXT"
+    selected.write_text("Grüße aus Wien", encoding="utf-8")
+
+    class FileDialog:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        def askopenfilename(self, **kwargs: object) -> str:
+            self.calls.append(kwargs)
+            return str(selected)
+
+    class MessageBox:
+        def showerror(self, *_args: object) -> None:
+            raise AssertionError("valid text file must not show an error")
+
+    app = DesktopApp.__new__(DesktopApp)
+    app.filedialog = FileDialog()
+    app.messagebox = MessageBox()
+    loaded: list[str] = []
+    app._set_source_text = loaded.append
+
+    app.open_file()
+
+    assert app.filedialog.calls == [{"filetypes": (("Textdatei", "*.txt"), ("Markdown-Datei", "*.md"))}]
+    assert loaded == ["Grüße aus Wien"]
+
+
+def test_open_file_rejects_unsupported_and_oversized_files_before_reading(monkeypatch, tmp_path) -> None:
+    from app import desktop
+    from app.desktop import DesktopApp
+
+    oversized = tmp_path / "zu_gross.md"
+    oversized.write_bytes(b"1234")
+    monkeypatch.setattr(desktop, "MAX_OPEN_FILE_BYTES", 3)
+    read_attempts: list[object] = []
+    monkeypatch.setattr(
+        desktop,
+        "read_preflighted_text_file",
+        lambda candidate: read_attempts.append(candidate) or "darf nicht gelesen werden",
+    )
+
+    class FileDialog:
+        def __init__(self, path: str) -> None:
+            self.path = path
+
+        def askopenfilename(self, **_kwargs: object) -> str:
+            return self.path
+
+    class MessageBox:
+        def __init__(self) -> None:
+            self.errors: list[tuple[str, str]] = []
+
+        def showerror(self, title: str, message: str) -> None:
+            self.errors.append((title, message))
+
+    def source_must_not_change(_content: str) -> None:
+        raise AssertionError("source must not change")
+
+    def open_selected(path: str) -> tuple[list[tuple[str, str]], list[object]]:
+        app = DesktopApp.__new__(DesktopApp)
+        app.filedialog = FileDialog(path)
+        app.messagebox = MessageBox()
+        app._set_source_text = source_must_not_change
+        app.open_file()
+        return app.messagebox.errors, list(read_attempts)
+
+    unsupported_errors, _ = open_selected(str(tmp_path / "nicht_text.pdf"))
+    oversized_errors, attempts = open_selected(str(oversized))
+
+    assert unsupported_errors[0][0] == "Dateityp nicht unterstützt"
+    assert oversized_errors[0][0] == "Datei zu groß"
+    assert attempts == []
+
+
+def test_preflight_and_reader_return_clear_local_errors_for_unreadable_content(tmp_path) -> None:
+    unsupported = tmp_path / "notiz.pdf"
+    invalid_utf8 = tmp_path / "notiz.md"
+    invalid_utf8.write_bytes(b"\xff")
+
+    try:
+        preflight_open_text_file(unsupported)
+    except OpenTextFileError as error:
+        assert error.title == "Dateityp nicht unterstützt"
+    else:
+        raise AssertionError("unsupported suffix must be rejected")
+
+    assert preflight_open_text_file(invalid_utf8) == invalid_utf8
+    try:
+        read_preflighted_text_file(invalid_utf8)
+    except OpenTextFileError as error:
+        assert error.title == "Datei nicht lesbar"
+        assert "UTF-8" in str(error)
+    else:
+        raise AssertionError("invalid UTF-8 must not be loaded")
+
+    assert MAX_OPEN_FILE_BYTES > 2_000_000
 
 
 def test_safe_result_action_invalidates_slow_model_and_starts_rules_cleanup(monkeypatch) -> None:

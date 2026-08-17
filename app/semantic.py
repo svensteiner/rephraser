@@ -36,10 +36,21 @@ _ENTITY_WORD = r"(?!(?:EUR|USD|CHF|GBP|Q[1-4])\b)[A-ZÄÖÜ][\wÄÖÜäöüß&.'
 _ENTITY = rf"{_ENTITY_WORD}(?:[ \t]+{_ENTITY_WORD}){{0,3}}"
 _RECIPIENT_END = r"(?=\s*(?:[,;:.!?)]|$|(?:EUR|USD|CHF|GBP)\b|[€$£]|\d))"
 _MONEY_NUMBER = r"(?:\d{1,3}(?:[. ,]\d{3})+|\d+)(?:[,.]\d+)?"
-_CURRENCY = r"(?:EUR|USD|CHF|GBP|€|\$|£)"
+# Currency words deliberately stay explicit.  A written currency plus a scale
+# (``10 million euros``) is a materially different fact from a bare quantity
+# (``10 million shares``), so it gets its own extractor below.
+_CURRENCY = (
+    r"(?:EUR|USD|CHF|GBP|€|\$|£|euros?|"
+    r"U\.?S\.?\s+dollars?|dollars?|Schweizer\s+Franken|francs?|"
+    r"british\s+pounds?|pounds?)"
+)
 _MONEY_SCALE = (
     r"(?:thousand|million(?:s)?|billion(?:s)?|trillion(?:s)?|"
     r"tausend|mio\.?|millionen?|mrd\.?|milliarden?|bn|mn|tn|k|m)"
+)
+_QUANTITY_UNIT = (
+    r"(?:basis\s+points?|bps?|percentage\s+points?|pp|days?|months?|years?|shares?|"
+    r"basispunkte?|prozentpunkte?|tage?|monate?|jahre?|aktien)"
 )
 
 _PAYMENT_OBLIGATION_PATTERNS = (
@@ -77,6 +88,11 @@ _MONETARY_AMOUNT_PATTERNS = (
         re.I,
     ),
 )
+_QUANTIFIED_VALUE_PATTERN = re.compile(
+    rf"(?<![\w\d])(?P<amount>{_MONEY_NUMBER})"
+    rf"(?:\s+(?P<scale>{_MONEY_SCALE}))?\s+(?P<unit>{_QUANTITY_UNIT})(?![\w])",
+    re.I,
+)
 _TABLE_SEPARATOR = re.compile(r":?-{3,}:?")
 
 
@@ -98,6 +114,15 @@ class MonetaryAmount:
 
 
 @dataclass(frozen=True)
+class QuantifiedValue:
+    """A narrow, explicit number-plus-unit statement used for safety checks."""
+
+    amount: str
+    scale: str
+    unit: str
+
+
+@dataclass(frozen=True)
 class NumericTableLayout:
     """Normalized numeric cells and their visible Markdown-table context."""
 
@@ -114,7 +139,30 @@ def _normalise_semantic_text(value: str) -> str:
 
 
 def _normalise_currency(value: str) -> str:
-    return {"€": "eur", "$": "usd", "£": "gbp"}.get(value, value.casefold())
+    compact = _normalise_semantic_text(value).replace(".", "")
+    aliases = {
+        "€": "eur",
+        "eur": "eur",
+        "euro": "eur",
+        "euros": "eur",
+        "$": "usd",
+        "usd": "usd",
+        "us dollar": "usd",
+        "us dollars": "usd",
+        "£": "gbp",
+        "gbp": "gbp",
+        "pound": "gbp",
+        "pounds": "gbp",
+        "british pound": "gbp",
+        "british pounds": "gbp",
+        "chf": "chf",
+        "schweizer franken": "chf",
+        "franc": "chf",
+        "francs": "chf",
+    }
+    # A bare ``dollar`` is intentionally not assumed to be USD.  It remains a
+    # stable generic currency label, which is enough to catch a scale change.
+    return aliases.get(compact, compact)
 
 
 def _normalise_scale(value: str) -> str:
@@ -128,6 +176,40 @@ def _normalise_scale(value: str) -> str:
     if compact in {"tn", "trillion", "trillions"}:
         return "trillion"
     return compact
+
+
+def _normalise_quantity_unit(value: str) -> str:
+    compact = re.sub(r"\s+", " ", unicodedata.normalize("NFC", value).strip()).casefold()
+    aliases = {
+        "bp": "basis_points",
+        "bps": "basis_points",
+        "basis point": "basis_points",
+        "basis points": "basis_points",
+        "basispunkt": "basis_points",
+        "basispunkte": "basis_points",
+        "pp": "percentage_points",
+        "percentage point": "percentage_points",
+        "percentage points": "percentage_points",
+        "prozentpunkt": "percentage_points",
+        "prozentpunkte": "percentage_points",
+        "day": "days",
+        "days": "days",
+        "tag": "days",
+        "tage": "days",
+        "month": "months",
+        "months": "months",
+        "monat": "months",
+        "monate": "months",
+        "year": "years",
+        "years": "years",
+        "jahr": "years",
+        "jahre": "years",
+        "share": "shares",
+        "shares": "shares",
+        "aktie": "shares",
+        "aktien": "shares",
+    }
+    return aliases.get(compact, compact)
 
 
 def extract_payment_obligations(text: str) -> list[PaymentObligation]:
@@ -180,6 +262,25 @@ def extract_monetary_amounts(text: str) -> list[MonetaryAmount]:
             if amount not in amounts:
                 amounts.append(amount)
     return amounts
+
+
+def extract_quantified_values(text: str) -> list[QuantifiedValue]:
+    """Return clear units whose change alters a quantity's business meaning.
+
+    This is purposefully narrower than generic unit parsing.  It protects the
+    common high-impact units that can change a legal deadline, a rate, or a
+    stated magnitude while retaining the same digits.
+    """
+    values: list[QuantifiedValue] = []
+    for match in _QUANTIFIED_VALUE_PATTERN.finditer(text):
+        value = QuantifiedValue(
+            amount=_normalise_semantic_text(match.group("amount")),
+            scale=_normalise_scale(match.group("scale")) if match.group("scale") else "",
+            unit=_normalise_quantity_unit(match.group("unit")),
+        )
+        if value not in values:
+            values.append(value)
+    return values
 
 
 def _pipe_cells(line: str) -> tuple[str, ...]:
