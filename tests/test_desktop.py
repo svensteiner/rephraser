@@ -3,6 +3,8 @@ from app.desktop import (
     MODE_AUTOMATIC,
     MODE_SAFE,
     MODE_STRONG,
+    STARTUP_ERROR_MESSAGE,
+    STARTUP_ERROR_TITLE,
     available_modes,
     local_mistral_ready,
     primary_action_label,
@@ -11,6 +13,7 @@ from app.desktop import (
     RELEASE_PAGE_URL,
     result_is_current,
     run_self_test,
+    show_startup_error,
     system_status_text,
 )
 
@@ -69,6 +72,47 @@ def test_desktop_self_test_preserves_german_values() -> None:
     assert report["safe_cleanup"] is True
     assert report["protected_values"] is True
     assert report["fast_editor"] is True
+
+
+def test_native_startup_error_is_private_and_windows_only(monkeypatch) -> None:
+    from app import desktop
+
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(desktop.sys, "platform", "win32")
+    monkeypatch.setattr(
+        desktop,
+        "_show_native_startup_dialog",
+        lambda title, message: calls.append((title, message)),
+    )
+
+    assert show_startup_error() is True
+    assert calls == [(STARTUP_ERROR_TITLE, STARTUP_ERROR_MESSAGE)]
+    assert "kein eingegebener Text" in STARTUP_ERROR_MESSAGE
+    assert "RuntimeError" not in STARTUP_ERROR_MESSAGE
+
+    monkeypatch.setattr(desktop.sys, "platform", "linux")
+    assert show_startup_error() is False
+    assert len(calls) == 1
+
+
+def test_fatal_desktop_startup_is_logged_and_shown_without_error_details(monkeypatch) -> None:
+    from app import desktop
+
+    events: list[tuple[str, BaseException]] = []
+    shown: list[bool] = []
+
+    class BrokenDesktopApp:
+        def __init__(self) -> None:
+            raise RuntimeError("VERTRAULICHER MANDANTENTEXT")
+
+    monkeypatch.setattr(desktop, "DesktopApp", BrokenDesktopApp)
+    monkeypatch.setattr(desktop, "write_diagnostic_event", lambda event, error: events.append((event, error)))
+    monkeypatch.setattr(desktop, "show_startup_error", lambda: shown.append(True) or True)
+
+    assert desktop.main([]) == 1
+    assert [event for event, _ in events] == ["desktop_fatal"]
+    assert isinstance(events[0][1], RuntimeError)
+    assert shown == [True]
 
 
 def test_readiness_check_refuses_non_loopback_hostname(monkeypatch) -> None:

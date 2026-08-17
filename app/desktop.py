@@ -38,6 +38,13 @@ RELEASE_PAGE_URL = "https://github.com/svensteiner/rephraser/releases/tag/portab
 MAX_CHARACTERS = 2_000_000
 CHANGE_PREVIEW_MAX_CHARACTERS = 200_000
 INDIVIDUAL_CHANGE_MAX_GROUPS = 100
+STARTUP_ERROR_TITLE = "Text verbessern – Startproblem"
+STARTUP_ERROR_MESSAGE = (
+    "Text verbessern konnte nicht gestartet werden.\n\n"
+    "Bitte schließen Sie das Programm und versuchen Sie es erneut. Wenn das Problem bleibt, "
+    "laden Sie die aktuelle Ausgabe über die GitHub-Releases herunter.\n\n"
+    "Zur Diagnose wird nur eine Fehlerkennung gespeichert – kein eingegebener Text."
+)
 KEYBOARD_SHORTCUTS = {
     "F1": "Info & Hilfe",
     "Strg+O": "Datei öffnen",
@@ -47,6 +54,25 @@ KEYBOARD_SHORTCUTS = {
     "Escape": "Sichere Fassung / manuelle Änderungen verwerfen",
     "Strg+Umschalt+C": "Ergebnis kopieren",
 }
+
+
+def _show_native_startup_dialog(title: str, message: str) -> None:
+    """Display a Windows error dialog without requiring a running Tk window."""
+    import ctypes
+
+    message_box_flags = 0x00000010 | 0x00010000  # MB_ICONERROR | MB_SETFOREGROUND
+    ctypes.windll.user32.MessageBoxW(None, message, title, message_box_flags)
+
+
+def show_startup_error() -> bool:
+    """Best-effort, privacy-safe fatal-error feedback for windowed Windows builds."""
+    if sys.platform != "win32":
+        return False
+    try:
+        _show_native_startup_dialog(STARTUP_ERROR_TITLE, STARTUP_ERROR_MESSAGE)
+    except Exception:
+        return False
+    return True
 
 
 def processing_settings(mode: str, mistral_ready: bool) -> tuple[str, str]:
@@ -1380,6 +1406,7 @@ def main(argv: list[str] | None = None) -> int:
         DesktopApp().run()
     except Exception as error:
         write_diagnostic_event("desktop_fatal", error)
+        show_startup_error()
         return 1
     return 0
 

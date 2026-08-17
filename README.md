@@ -77,6 +77,23 @@ zusätzlich zur Verfügung, wenn auf dem jeweiligen PC Ollama mit `mistral` loka
 Es gibt keinen Cloud-Fallback. Da die EXE derzeit nicht kommerziell codesigniert ist,
 kann Windows beim ersten Start eine Sicherheitsabfrage anzeigen.
 
+## Browser-Ausgabe ohne Installation
+
+Für einen gesperrten oder fremden PC steht zusätzlich die statische
+[Browser-Ausgabe](https://svensteiner.github.io/rephraser/) bereit. Sie läuft nach dem
+Aufruf direkt im Browser und benötigt weder Python noch eine Installation.
+
+Die Seite lädt ihre Programmdateien von GitHub Pages; eingefügter Text, geöffnete
+Dateien und das Ergebnis werden von der Anwendung nicht übertragen. Es gibt keine
+Anmeldung, Analyse-API, Telemetrie oder Cloud-Fallback. Zwischenablage und Downloads
+folgen den Einstellungen des verwendeten Browsers und Betriebssystems. Der optionale
+Prüfbericht ist eine datensparsame Zusammenfassung mit Hashwerten, Statistiken und
+Änderungsarten – vertrauliche Prüfberichte bitte nicht weitergeben.
+Die Browser-Ausgabe bietet sichere Unicode-/Copy-Paste-Bereinigung und wenige feste,
+prüfbare DE/EN-Formulierungsregeln. Sie enthält absichtlich kein Mistral-Modell und
+keine vollständige semantische Prüfung. Für gründliche lokale Modellbearbeitung bleibt
+die portable Windows-App zuständig; wichtige Texte müssen immer selbst gelesen werden.
+
 ## Einfachster Start unter Windows
 
 1. Doppelklicke im Projektordner auf **`TEXT VERBESSERN.cmd`**.
